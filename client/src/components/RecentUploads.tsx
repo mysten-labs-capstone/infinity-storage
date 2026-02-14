@@ -28,6 +28,7 @@ import {
   StatusBadgeTooltip,
   STATUS_BADGE_TOOLTIPS,
 } from "./StatusBadgeTooltip";
+import { useDaysPerEpoch } from "../hooks/useDaysPerEpoch";
 
 export type UploadedFile = {
   blobId: string;
@@ -56,6 +57,7 @@ export default function RecentUploads({
   items: UploadedFile[];
   onFileDeleted?: () => void;
 }) {
+  const daysPerEpoch = useDaysPerEpoch();
   const { privateKey, requestReauth } = useAuth();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -219,7 +221,6 @@ YOUR FILES:
 
     const calculateExpiryInfo = (uploadedAt: string, epochs: number = 3) => {
       const uploadDate = new Date(uploadedAt);
-      const daysPerEpoch = 14;
       const totalDays = epochs * daysPerEpoch;
       const expiryDate = new Date(
         uploadDate.getTime() + totalDays * 24 * 60 * 60 * 1000,
@@ -498,7 +499,7 @@ YOUR FILES:
 
   const calculateExpiryInfo = (uploadedAt: string, epochs: number = 3) => {
     const uploadDate = new Date(uploadedAt);
-    const daysPerEpoch = 14;
+
     const totalDays = epochs * daysPerEpoch;
     const expiryDate = new Date(
       uploadDate.getTime() + totalDays * 24 * 60 * 60 * 1000,

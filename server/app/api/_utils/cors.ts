@@ -24,9 +24,27 @@ export function withCORS(req: Request, extra?: HeadersInit): Headers {
 
   let allowOrigin: string | null = null;
 
+  // Check if origin is allowed
+  if (STATIC_ALLOWED.has(origin)) {
+    allowOrigin = origin;
+  } else if (NETLIFY_PREVIEW_REGEX.test(origin)) {
+    allowOrigin = origin;
+  } else if (NETLIFY_ANY_REGEX.test(origin)) {
+    allowOrigin = origin;
+  } else if (VERCEL_PREVIEW_REGEX.test(origin)) {
+    allowOrigin = origin;
+  }
+
+  // Set CORS headers
+  if (allowOrigin) {
+    headers.set("Access-Control-Allow-Origin", allowOrigin);
+    headers.set("Access-Control-Allow-Credentials", "true");
+  }
+
   headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
   headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin");
   headers.set("Access-Control-Max-Age", "86400");
+  headers.set("Vary", "Origin");
 
   return headers;
 }

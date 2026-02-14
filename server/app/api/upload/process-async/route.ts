@@ -1,128 +1,13 @@
 import { NextResponse } from "next/server";
 import { initWalrus } from "@/utils/walrusClient";
 import { s3Service } from "@/utils/s3Service";
+import { calculateExpirationDate } from "@/utils/epochService";
 // TODO: cacheService removed from async processing to simplify flow and avoid cache errors
 import prisma from "../../_utils/prisma";
 import { withCORS } from "../../_utils/cors";
-import { calculateUploadCostUSD, deductPayment } from "@/utils/paymentService";
 
 export const runtime = "nodejs";
 export const maxDuration = 180; // 3 minutes (increased from 2 minutes to allow longer Walrus timeouts)
-
-// Upload error codes in logs: object_locked, storage_nodes_failures, stale_coin, timeout, chain_epoch_or_consensus, network_error, tx_rejected, unknown
-
-/** Short code for log lines; avoids spamming logs with long Sui/Walrus messages */
-function classifyUploadError(message: string): string {
-  if (!message) return "unknown";
-  if (message.includes("already locked by a different transaction")) return "object_locked";
-  if (message.includes("Too many failures while writing blob") && message.includes("to nodes")) return "storage_nodes_failures";
-  if (message.includes("is not available for consumption") || message.includes("current version")) return "stale_coin";
-  if (message.includes("Walrus upload timeout")) return "timeout";
-  if (message.includes("wrong epoch") || message.includes("consensus rounds are lagging")) return "chain_epoch_or_consensus";
-  if (message.includes("fetch failed") || message === "fetch failed") return "network_error";
-  if (message.includes("Transaction is rejected") && message.includes("non-retriable")) return "tx_rejected";
-  return "unknown";
-}
-
-/**
- * Detects if error is due to stale coin state (object version mismatch)
- * This happens when a transaction fails partway through and the coin's version increments,
- * but the retry still tries to use the old version
- */
-function isCoinStateError(error: any): boolean {
-  const message = error?.message || String(error);
-  return (
-    message.includes("is not available for consumption") ||
-    message.includes("current version")
-  );
-}
-
-/**
- * Upload blob to Walrus with coin state retry logic
- * When a transaction fails mid-execution, coin state becomes stale.
- * This wrapper fetches fresh coins from the blockchain and retries.
- */
-async function writeWithCoinRetry(
-  walrusClient: any,
-  suiClient: any,
-  signer: any,
-  blobData: Uint8Array,
-  epochs: number,
-  maxRetries: number = 3,
-  uploadTimeout: number = 170000,
-): Promise<{ blobId: string; blobObjectId: string | null }> {
-  let lastError: any = null;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      // On retry after coin state error, fetch fresh coins to update our view of chain state
-      if (attempt > 0) {
-        try {
-          const signerAddress = signer.toSuiAddress();
-          const freshCoins = await suiClient.getCoins({ owner: signerAddress });
-        } catch (coinErr: any) {
-          console.warn("[process-async] Fetch fresh coins failed, retrying with current state");
-          // Continue anyway - writeBlob will try with whatever state it has
-        }
-      }
-
-      // Attempt upload with timeout protection
-      const uploadPromise = walrusClient.writeBlob({
-        blob: blobData,
-        signer,
-        epochs,
-        deletable: true,
-      });
-
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(
-          () =>
-            reject(new Error(`Walrus upload timeout after ${uploadTimeout}ms`)),
-          uploadTimeout,
-        ),
-      );
-
-      const result = await Promise.race([uploadPromise, timeoutPromise]);
-
-      const blobObjectId =
-        (result as any).blobObject?.id?.id ||
-        (result as any).blobObjectId ||
-        (result as any).objectId ||
-        null;
-
-      return {
-        blobId: (result as any).blobId,
-        blobObjectId,
-      };
-    } catch (err: any) {
-      lastError = err;
-      const isCoinError = isCoinStateError(err);
-      const isRetryable =
-        isCoinError ||
-        err?.message?.includes("temporarily unavailable") ||
-        err?.message?.includes("timeout");
-      const code = classifyUploadError(err?.message || "");
-
-      console.warn(
-        `[process-async] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${code}${isRetryable ? " (will retry)" : ""}`,
-      );
-
-      // Only retry on specific retryable errors
-      if (attempt < maxRetries && isRetryable) {
-        // Exponential backoff: 2s, 4s, 8s
-        const delayMs = 2000 * Math.pow(2, attempt);
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        continue;
-      }
-
-      // Non-retryable error or max retries exceeded
-      throw err;
-    }
-  }
-
-  // Should not reach here, but just in case
-  throw lastError || new Error("Upload failed after all retries");
-}
 
 /**
  * Background job to upload files from S3 to Walrus
@@ -134,7 +19,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { fileId, s3Key, tempBlobId, userId, epochs } = body;
 
-    if (!fileId || !s3Key || !tempBlobId || !userId) {
+    if (!fileId || !s3Key || !tempBlobId) {
       return NextResponse.json(
         { error: "Missing required parameters" },
         { status: 400, headers: withCORS(req) },
@@ -148,7 +33,7 @@ export async function POST(req: Request) {
         data: { status: "processing" },
       });
     } catch (dbErr: any) {
-      console.error("[process-async] DB update failed:", dbErr?.message || String(dbErr));
+      console.error("[process-async] DB update failed:", dbErr);
       return NextResponse.json(
         { error: "DB update failed", detail: dbErr?.message || String(dbErr) },
         { status: 500, headers: withCORS(req) },
@@ -162,7 +47,7 @@ export async function POST(req: Request) {
       buffer = await s3Service.download(s3Key);
       const s3Duration = Date.now() - s3StartTime;
     } catch (s3Err: any) {
-      console.error("[process-async] S3 download failed:", s3Err?.message || String(s3Err));
+      console.error("[process-async] S3 download failed:", s3Err);
       await prisma.file
         .update({ where: { id: fileId }, data: { status: "failed" } })
         .catch(() => {});
@@ -176,7 +61,7 @@ export async function POST(req: Request) {
     }
 
     // Upload to Walrus with retries
-    const { walrusClient, signer, suiClient } = await initWalrus();
+    const { walrusClient, signer } = await initWalrus();
 
     // Get file details for logging
     const fileRecord = await prisma.file.findUnique({
@@ -202,23 +87,39 @@ export async function POST(req: Request) {
     const uploadStartTime = Date.now();
 
     try {
-      const result = await writeWithCoinRetry(
-        walrusClient,
-        suiClient,
+
+      // Wrap in Promise.race for timeout protection
+      const uploadPromise = walrusClient.writeBlob({
+        blob: new Uint8Array(buffer),
         signer,
-        new Uint8Array(buffer),
         epochs,
-        3, // maxRetries
-        uploadTimeout,
+        deletable: true,
+      });
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(
+          () =>
+            reject(new Error(`Walrus upload timeout after ${uploadTimeout}ms`)),
+          uploadTimeout,
+        ),
       );
-      blobId = result.blobId;
-      blobObjectId = result.blobObjectId;
+
+      const result = await Promise.race([uploadPromise, timeoutPromise]);
+
+      const uploadDuration = Date.now() - uploadStartTime;
+
+      blobId = (result as any).blobId;
+      blobObjectId = (result as any).blobObject?.id?.id || null;
     } catch (err: any) {
       const uploadDuration = Date.now() - uploadStartTime;
-      const errCode = classifyUploadError(err?.message || "");
-      console.error(
-        `[process-async] Upload failed | fileId=${fileId} | file=${fileRecord?.filename ?? "?"} | code=${errCode} | ${uploadDuration}ms`,
-      );
+      console.error("[process-async] Walrus upload FAILED:", {
+        fileId,
+        filename: fileRecord?.filename,
+        encrypted: fileRecord?.encrypted,
+        duration: `${uploadDuration}ms`,
+        error: err?.message || String(err),
+        errorStack: err?.stack,
+      });
 
       // Extract blobId from error message if available
       const match = err?.message?.match(/blob ([A-Za-z0-9_-]+)/);
@@ -230,14 +131,9 @@ export async function POST(req: Request) {
     }
 
     if (blobId) {
-      // Get the filename from the current file record for deduplication
-      const currentFile = await prisma.file.findUnique({
-        where: { id: fileId },
-        select: { filename: true },
-      });
-
       // Update database with real blobId
       try {
+        const expiresAt = await calculateExpirationDate(epochs);
         await prisma.file.update({
           where: { id: fileId },
           data: {
@@ -245,26 +141,9 @@ export async function POST(req: Request) {
             blobObjectId,
             status: "completed",
             lastAccessedAt: new Date(),
+            expiresAt,
           },
         });
-
-        // Clean up old failed/pending records with the same userId and filename
-        // This prevents duplicate file entries when uploads are retried
-        if (currentFile?.filename) {
-          try {
-            await prisma.file.deleteMany({
-              where: {
-                userId,
-                filename: currentFile.filename,
-                id: { not: fileId }, // Don't delete the current file
-                status: { in: ["failed", "pending"] }, // Only delete failed or pending ones
-              },
-            });
-          } catch (cleanupErr: any) {
-            console.warn("[process-async] Cleanup old records failed:", cleanupErr?.message);
-            // Don't fail the upload if cleanup fails
-          }
-        }
       } catch (dbErr: any) {
         // Handle duplicate blobId (same file uploaded multiple times)
         if (dbErr.code === "P2002" && dbErr.meta?.target?.includes("blobId")) {
@@ -288,33 +167,20 @@ export async function POST(req: Request) {
         throw dbErr;
       }
 
-      let paymentError: string | null = null;
-      try {
-        const costUSD = await calculateUploadCostUSD(buffer.length, epochs);
-        await deductPayment(
-          userId,
-          costUSD,
-          `Upload: ${fileRecord?.filename || "file"}`,
-        );
-      } catch (paymentErr: any) {
-        paymentError = paymentErr?.message || String(paymentErr);
-        console.error("[process-async] Payment failed after upload | fileId=" + fileId + " | " + paymentError);
-      }
-
       const totalDuration = Date.now() - startTime;
-      console.log(`[process-async] Completed | fileId=${fileId} | file=${fileRecord?.filename ?? "?"} | blobId=${blobId} | ${totalDuration}ms`);
       return NextResponse.json(
         {
           message: "Background upload completed",
           blobId,
           status: "completed",
-          paymentError: paymentError || undefined,
         },
         { status: 200, headers: withCORS(req) },
       );
     } else {
-      const failCode = uploadError ? classifyUploadError(uploadError) : "unknown";
-      console.error(`[process-async] Marked as failed | fileId=${fileId} | code=${failCode}`);
+      console.error("[process-async] No blobId received, marking as failed:", {
+        fileId,
+        uploadError,
+      });
       try {
         await prisma.file.update({
           where: { id: fileId },
@@ -323,7 +189,10 @@ export async function POST(req: Request) {
           },
         });
       } catch (dbErr: any) {
-        console.error("[process-async] DB update to failed status failed:", dbErr?.message);
+        console.error(
+          "[process-async] Failed to update status to failed:",
+          dbErr,
+        );
         // Silently handle DB errors
       }
 
@@ -339,7 +208,10 @@ export async function POST(req: Request) {
       );
     }
   } catch (err: any) {
-    console.error("[process-async] Unexpected error:", err?.message || String(err));
+    console.error("[process-async] UNEXPECTED ERROR:", {
+      error: err?.message || String(err),
+      stack: err?.stack,
+    });
     return NextResponse.json(
       { error: err.message },
       { status: 500, headers: withCORS(req) },

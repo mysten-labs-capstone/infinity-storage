@@ -1,425 +1,294 @@
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
-import { Upload, Lock, LockOpen } from "lucide-react";
+import { Trash2, Upload, Lock, LockOpen, FileUp, Clock } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
+import { useSingleFileUpload } from "../hooks/useSingleFileUpload";
 import { useUploadQueue } from "../hooks/useUploadQueue";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Switch } from "./ui/switch";
+import { Button } from "./ui/button";
 import { PaymentApprovalDialog } from "./PaymentApprovalDialog";
-import {
-  BatchPaymentApprovalDialog,
-  BatchPaymentQuote,
-} from "./BatchPaymentApprovalDialog";
-import { apiUrl } from "../config/api";
-import { authService } from "../services/authService";
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
 
 type UploadSectionProps = {
-  onUploaded?: (file: {
-    blobId: string;
-    file: File;
-    encrypted: boolean;
-    epochs?: number;
-  }) => void;
+  onUploaded?: (file: { blobId: string; file: File; encrypted: boolean; epochs?: number }) => void;
   epochs: number;
   onEpochsChange: (epochs: number) => void;
-  onFileQueued?: () => void;
-  onSingleFileUploadStarted?: () => void;
-  currentFolderId?: string | null;
 };
 
-export default function UploadSection({
-  onUploaded,
-  epochs,
-  onEpochsChange,
-  onFileQueued,
-  onSingleFileUploadStarted,
-  currentFolderId = null,
-}: UploadSectionProps) {
+export default function UploadSection({ onUploaded, epochs, onEpochsChange }: UploadSectionProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const { privateKey, requestReauth } = useAuth();
-  const { enqueue, processQueue } = useUploadQueue();
-  const user = authService.getCurrentUser();
-  // Read encryption preference from localStorage
-  const [encrypt, setEncrypt] = useState(() => {
-    try {
-      const saved = localStorage.getItem("walrus_encryption_enabled");
-      return saved !== null ? JSON.parse(saved) : true;
-    } catch {
-      return true;
-    }
-  });
-  const [dragActive, setDragActive] = useState(false);
+  const { privateKey } = useAuth();
+  const { enqueue } = useUploadQueue();
+  const { state, startUpload, reset } = useSingleFileUpload(onUploaded);
+  const [encrypt, setEncrypt] = useState(true);
+  const [showToast, setShowToast] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
-  const [fileSizeError, setFileSizeError] = useState<string | null>(null);
-  const [paymentError, setPaymentError] = useState<string | null>(null);
-  const [pendingQueueFiles, setPendingQueueFiles] = useState<File[]>([]);
-  const [shouldOpenFilePicker, setShouldOpenFilePicker] = useState(false);
-  // Store the target folder ID for the current upload operation
-  // This can differ from currentFolderId when files are dragged to a specific folder
-  const [targetFolderId, setTargetFolderId] = useState<string | null>(null);
 
   const canEncrypt = useMemo(() => !!privateKey, [privateKey]);
-  const paymentFile = useMemo(() => {
-    if (selectedFiles.length === 0) return null;
-    if (selectedFiles.length === 1) return selectedFiles[0];
-    const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
-    return {
-      name: `${selectedFiles.length} files`,
-      size: totalSize,
-    } as File;
-  }, [selectedFiles]);
+  const selectedFile = selectedFiles.length === 1 ? selectedFiles[0] : null;
 
-  const isBatchSelection = selectedFiles.length > 1;
-
-  const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
-
-  // Resume pending files after reauth succeeds
   useEffect(() => {
-    if (pendingQueueFiles.length > 0 && privateKey) {
-      setSelectedFiles(pendingQueueFiles);
-      setPendingQueueFiles([]);
-      setShowPaymentDialog(true);
+    if (state.status === "done") {
+      setShowToast("✅ Upload complete");
+      const timer = setTimeout(() => {
+        setShowToast(null);
+        reset();
+        setSelectedFiles([]);
+      }, 5000);
+      return () => clearTimeout(timer);
     }
-  }, [pendingQueueFiles, privateKey]);
-
-  // Open file picker after reauth succeeds
-  useEffect(() => {
-    if (shouldOpenFilePicker && privateKey) {
-      setShouldOpenFilePicker(false);
-      inputRef.current?.click();
-    }
-  }, [shouldOpenFilePicker, privateKey]);
+  }, [state.status, reset]);
 
   const pickFile = useCallback(() => {
-    // If encryption is enabled but key is missing, request reauth first
-    if (encrypt && !privateKey) {
-      setShouldOpenFilePicker(true);
-      requestReauth();
-      return;
-    }
-
     inputRef.current?.click();
-  }, [encrypt, privateKey, requestReauth]);
-
-  // Listen for global "open-upload-picker" events (triggered when navigating from other pages)
-  useEffect(() => {
-    const handler = () => pickFile();
-    window.addEventListener("open-upload-picker", handler);
-    return () => window.removeEventListener("open-upload-picker", handler);
-  }, [pickFile]);
-
-  // Listen for "upload-files-dropped" events (triggered when files are drag-dropped onto the page)
-  useEffect(() => {
-    const handler = async (e: Event) => {
-      const customEvent = e as CustomEvent<{
-        files: File[];
-        folderId?: string | null;
-      }>;
-      const files = customEvent.detail?.files || [];
-      const folderId = customEvent.detail?.folderId;
-
-      if (files.length === 0) {
-        console.warn("No files in upload-files-dropped event");
-        return;
-      }
-
-      // Check file size limit
-      const oversizedFiles = files.filter((f) => f.size > MAX_FILE_SIZE);
-      if (oversizedFiles.length > 0) {
-        const fileNames = oversizedFiles.map((f) => f.name).join(", ");
-        setFileSizeError(
-          `File(s) exceed maximum size of ${MAX_FILE_SIZE / (1024 * 1024)}MB: ${fileNames}`,
-        );
-        return;
-      }
-
-      // Clear any previous error
-      setFileSizeError(null);
-      setPaymentError(null);
-
-      // Check encryption requirements
-      if (encrypt && !privateKey) {
-        setPendingQueueFiles(files);
-        setTargetFolderId(folderId || currentFolderId);
-        requestReauth();
-        return;
-      }
-
-      // Store the target folder for this upload operation
-      setTargetFolderId(folderId || currentFolderId);
-      // Open payment dialog
-      setSelectedFiles(files);
-      setShowPaymentDialog(true);
-    };
-    window.addEventListener("upload-files-dropped", handler as EventListener);
-    return () =>
-      window.removeEventListener(
-        "upload-files-dropped",
-        handler as EventListener,
-      );
-  }, [encrypt, privateKey, requestReauth, currentFolderId]);
-
-  const onFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (!files || files.length === 0) return;
-
-      const fileArray = Array.from(files);
-
-      // Check file size limit (100MB max to prevent server OOM)
-      const oversizedFiles = fileArray.filter((f) => f.size > MAX_FILE_SIZE);
-      if (oversizedFiles.length > 0) {
-        const fileNames = oversizedFiles.map((f) => f.name).join(", ");
-        setFileSizeError(
-          `File(s) exceed maximum size of ${MAX_FILE_SIZE / (1024 * 1024)}MB: ${fileNames}`,
-        );
-        if (e.target) e.target.value = "";
-        return;
-      }
-
-      // Clear any previous error
-      setFileSizeError(null);
-      setPaymentError(null);
-
-      // Check encryption requirements
-      if (encrypt && !privateKey) {
-        setPendingQueueFiles(fileArray);
-        setTargetFolderId(currentFolderId);
-        requestReauth();
-        if (e.target) e.target.value = "";
-        return;
-      }
-
-      // Store the target folder for this upload operation
-      setTargetFolderId(currentFolderId);
-      // If multiple files, open payment dialog and start uploads after approval
-      if (fileArray.length > 1) {
-        setSelectedFiles(fileArray);
-        setShowPaymentDialog(true);
-        if (e.target) e.target.value = "";
-      } else {
-        // Single file - open the payment flow immediately
-        setSelectedFiles(fileArray);
-        setShowPaymentDialog(true);
-      }
-    },
-    [encrypt, privateKey, requestReauth, currentFolderId],
-  );
-
-  const handlePaymentApproved = useCallback(
-    async (costUSD: number, selectedEpochs: number) => {
-      if (selectedFiles.length === 0) return;
-
-      setPaymentError(null);
-      const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
-      for (const file of selectedFiles) {
-        const share = totalSize > 0 ? file.size / totalSize : 0;
-        const perFileCost = costUSD * share;
-        await enqueue(
-          file,
-          encrypt,
-          perFileCost,
-          selectedEpochs,
-          targetFolderId,
-        );
-      }
-      setSelectedFiles([]);
-      setTargetFolderId(null); // Clear after upload
-      onEpochsChange(selectedEpochs);
-      processQueue();
-      onFileQueued?.();
-      onSingleFileUploadStarted?.();
-    },
-    [
-      selectedFiles,
-      encrypt,
-      onSingleFileUploadStarted,
-      enqueue,
-      processQueue,
-      onFileQueued,
-      onEpochsChange,
-      targetFolderId,
-    ],
-  );
-
-  const buildTempId = useCallback(
-    (file: File, index: number) => `${index}-${file.name}-${file.size}`,
-    [],
-  );
-
-  const handleBatchPaymentApproved = useCallback(
-    async (quote: BatchPaymentQuote, selectedEpochs: number) => {
-      if (selectedFiles.length === 0) return;
-
-      if (!user) {
-        setPaymentError("User not authenticated");
-        return;
-      }
-
-      setPaymentError(null);
-
-      try {
-        const tempIds = selectedFiles.map((file, index) =>
-          buildTempId(file, index),
-        );
-
-        const enqueueResponse = await fetch(
-          apiUrl("/api/upload/enqueue-batch"),
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              userId: user.id,
-              quoteId: quote.quoteId,
-              tempIds,
-            }),
-          },
-        );
-
-        if (!enqueueResponse.ok) {
-          const errorData = await enqueueResponse.json().catch(() => ({}));
-          throw new Error(errorData.error || "Batch quote validation failed");
-        }
-
-        const perFileCost = new Map(
-          quote.perFile.map((entry) => [entry.tempId, entry.costUSD]),
-        );
-
-        for (const [index, file] of selectedFiles.entries()) {
-          const tempId = buildTempId(file, index);
-          const costUSD = perFileCost.get(tempId);
-          if (costUSD === undefined) {
-            throw new Error("Missing cost for a selected file");
-          }
-          await enqueue(file, encrypt, costUSD, selectedEpochs, targetFolderId);
-        }
-
-        setSelectedFiles([]);
-        setTargetFolderId(null); // Clear after upload
-        onEpochsChange(selectedEpochs);
-        processQueue();
-        onFileQueued?.();
-        onSingleFileUploadStarted?.();
-      } catch (err) {
-        console.error("Failed to calculate batch costs:", err);
-        setPaymentError(
-          "Failed to calculate cost for all files. Please try again.",
-        );
-      }
-    },
-    [
-      selectedFiles,
-      encrypt,
-      enqueue,
-      processQueue,
-      onFileQueued,
-      onSingleFileUploadStarted,
-      onEpochsChange,
-      targetFolderId,
-      user,
-      buildTempId,
-    ],
-  );
-
-  const handlePaymentCancelled = useCallback(() => {
-    // User cancelled payment - clear selection so they can pick another file
-    setShowPaymentDialog(false);
-    setSelectedFiles([]);
-    setTargetFolderId(null); // Clear target folder
-    setPaymentError(null);
-    // Also reset the file input value so the same file can be selected again
-    if (inputRef.current) inputRef.current.value = "";
   }, []);
 
-  // Sync encryption preference to localStorage whenever it changes
-  useEffect(() => {
-    localStorage.setItem("walrus_encryption_enabled", JSON.stringify(encrypt));
-  }, [encrypt]);
+  const onFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    console.log("[UploadSection] onFileChange called, files:", files);
+    if (!files || files.length === 0) return;
 
-  // Listen for upload completion and notify parent component
-  useEffect(() => {
-    const handleUploadFinished = (e: CustomEvent) => {
-      const uploadedFile = e.detail;
-      if (onUploaded && uploadedFile) {
-        // Create a minimal File object for the callback
-        // The callback expects { blobId, file, encrypted, epochs }
-        const fileData = {
-          blobId: uploadedFile.blobId,
-          file: new File([], uploadedFile.name, { type: uploadedFile.type }),
-          encrypted: uploadedFile.encrypted,
-          epochs: uploadedFile.epochs,
-        };
-        onUploaded(fileData);
+    const fileArray = Array.from(files);
+    console.log("[UploadSection] fileArray:", fileArray);
+    
+    // If multiple files, automatically queue them
+    if (fileArray.length > 1) {
+      for (const file of fileArray) {
+        await enqueue(file, encrypt, undefined, epochs);
       }
-    };
+      setShowToast(`⏰ ${fileArray.length} files queued`);
+      setTimeout(() => setShowToast(null), 2500);
+      // Clear the input
+      if (e.target) e.target.value = '';
+    } else {
+      // Single file - show upload options
+      console.log("[UploadSection] Setting selectedFiles to:", fileArray);
+      setSelectedFiles(fileArray);
+    }
+  }, [enqueue, encrypt, epochs]);
 
-    window.addEventListener(
-      "lazy-upload-finished",
-      handleUploadFinished as EventListener,
-    );
-    return () =>
-      window.removeEventListener(
-        "lazy-upload-finished",
-        handleUploadFinished as EventListener,
-      );
-  }, [onUploaded]);
+  const handleUploadNow = useCallback(() => {
+    console.log("[UploadSection] handleUploadNow called, selectedFile:", selectedFile);
+    if (!selectedFile) {
+      console.log("[UploadSection] No selectedFile, returning");
+      return;
+    }
+    // Show payment approval dialog before upload
+    console.log("[UploadSection] Setting showPaymentDialog to true");
+    setShowPaymentDialog(true);
+  }, [selectedFile]);
+
+  const handlePaymentApproved = useCallback((costUSD: number, selectedEpochs: number) => {
+    if (!selectedFile) return;
+    // Use privateKey if available (for Session Signer), otherwise empty string (backend will use master key)
+    startUpload(selectedFile, privateKey || "", encrypt, costUSD, selectedEpochs);
+    setSelectedFiles([]);
+  }, [selectedFile, privateKey, encrypt, startUpload]);
+
+  const handlePaymentCancelled = useCallback(() => {
+    // User cancelled payment - do nothing
+  }, []);
+
+  const handleUploadLater = useCallback(async () => {
+    if (selectedFile) {
+      await enqueue(selectedFile, encrypt, undefined, epochs);
+      setShowToast(encrypt ? "⏰ Queued (will be encrypted)" : "⏰ Queued (no encryption)");
+      setSelectedFiles([]);
+      setTimeout(() => setShowToast(null), 2500);
+    }
+  }, [enqueue, selectedFile, encrypt, epochs]);
 
   return (
-    <>
-      {/* Hidden file input - component used headlessly */}
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={onFileChange}
-      />
-
-      {/* Error messages */}
-      {fileSizeError && !showPaymentDialog && (
-        <div className="animate-slide-up rounded-xl border border-red-200 bg-red-50 p-4 shadow-sm dark:border-red-900 dark:bg-red-950/50">
-          <p className="text-sm text-red-700 dark:text-red-400">
-            {fileSizeError}
-          </p>
+    <Card className="relative overflow-hidden border-blue-200/50 bg-gradient-to-br from-white to-blue-50/30 dark:from-slate-900 dark:to-slate-800">
+      <CardHeader>
+        <div className="flex items-start justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <FileUp className="h-6 w-6 text-cyan-600 dark:text-cyan-400" />
+              Upload Files
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Securely store your files on the Walrus decentralized network
+            </CardDescription>
+          </div>
         </div>
-      )}
-      {paymentError && !showPaymentDialog && (
-        <div className="animate-slide-up rounded-xl border border-red-200 bg-red-50 p-4 shadow-sm dark:border-red-900 dark:bg-red-950/50">
-          <p className="text-sm text-red-700 dark:text-red-400">
-            {paymentError}
-          </p>
-        </div>
-      )}
+      </CardHeader>
 
-      {/* Active Upload Status UI hidden */}
+      <CardContent className="space-y-6">
+        {/* Encryption Toggle */}
+        <div className="rounded-lg border-2 border-dashed border-blue-300/50 bg-blue-50/50 p-4 dark:border-blue-700/50 dark:bg-blue-950/20">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {encrypt ? (
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-green-500 to-emerald-500 shadow-md">
+                  <Lock className="h-5 w-5 text-white" />
+                </div>
+              ) : (
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 shadow-md">
+                  <LockOpen className="h-5 w-5 text-white" />
+                </div>
+              )}
+              <div>
+                <p className="font-semibold text-sm">
+                  {encrypt ? 'Encryption Enabled' : 'Encryption Disabled'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {encrypt ? 'Files will be encrypted before upload' : 'Files will be uploaded without encryption'}
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={encrypt}
+              onCheckedChange={setEncrypt}
+              disabled={state.status !== "idle"}
+            />
+          </div>
+        </div>
+
+        {/* Upload Area */}
+        <div
+          onClick={pickFile}
+          className="group relative cursor-pointer overflow-hidden rounded-xl border-2 border-dashed border-blue-300 bg-gradient-to-br from-blue-50 to-cyan-50 p-12 text-center transition-all hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-100 hover:to-cyan-100 dark:border-blue-700 dark:from-slate-800 dark:to-slate-700 dark:hover:border-blue-600"
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={onFileChange}
+          />
+          <div className="flex flex-col items-center gap-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg transition-transform group-hover:scale-110">
+              <Upload className="h-8 w-8 text-white" />
+            </div>
+            <div>
+              <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+                Click to select file(s)
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Select multiple files to queue them automatically
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Selected File UI */}
+        {selectedFile && state.status === "idle" && (
+          <div className="animate-slide-up space-y-3 rounded-xl border border-blue-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <p className="font-semibold text-gray-900 dark:text-gray-100">
+                  {selectedFile.name}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {formatBytes(selectedFile.size)}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedFiles([])}
+                className="text-red-600 hover:bg-red-50 hover:text-red-700"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Upload buttons */}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={(e) => {
+                  console.log("[UploadSection] Upload Now button clicked!", e);
+                  handleUploadNow();
+                }}
+                className="flex-1 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700"
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Upload Now
+              </Button>
+              <Button
+                type="button"
+                onClick={handleUploadLater}
+                variant="outline"
+                className="flex-1 border-blue-300 hover:bg-blue-50 dark:border-slate-600 dark:hover:bg-slate-800"
+              >
+                <Clock className="mr-2 h-4 w-4" />
+                Upload Later
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Active Upload Status UI */}
+        {/* Always show errors when present so validation failures are visible */}
+        {state.status === "error" && state.error && (
+          <div className="animate-slide-up space-y-3 rounded-xl border border-red-200 bg-red-50 p-4 shadow-sm dark:border-red-900 dark:bg-red-950/50 dark:text-red-400">
+            {state.error}
+          </div>
+        )}
+
+        {state.file && state.status !== "idle" && (
+          <div className="animate-slide-up space-y-3 rounded-xl border border-blue-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <p className="font-semibold text-gray-900 dark:text-gray-100">
+                  {state.file.name}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {formatBytes(state.file.size)} • {state.status}
+                </p>
+              </div>
+              {state.status !== "done" && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={reset}
+                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+
+            {/* Progress bar */}
+            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-slate-700">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-500 to-blue-600 transition-all duration-300"
+                style={{ width: `${state.progress}%` }}
+              />
+            </div>
+
+            {/* Error */}
+            {state.status === "error" && state.error && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-400">
+                {state.error}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
 
       {/* Payment Approval Dialog */}
-      {paymentFile && !isBatchSelection && (
+      {selectedFile && (
         <PaymentApprovalDialog
           open={showPaymentDialog}
-          onOpenChange={setShowPaymentDialog}
-          file={paymentFile}
+          onOpenChange={(open) => {
+            console.log("[UploadSection] PaymentDialog onOpenChange:", open);
+            setShowPaymentDialog(open);
+          }}
+          file={selectedFile}
           onApprove={handlePaymentApproved}
           onCancel={handlePaymentCancelled}
           epochs={epochs}
-          onEpochsChange={onEpochsChange}
         />
       )}
-      {isBatchSelection && selectedFiles.length > 0 && (
-        <BatchPaymentApprovalDialog
-          open={showPaymentDialog}
-          onOpenChange={setShowPaymentDialog}
-          files={selectedFiles.map((file, index) => ({
-            id: buildTempId(file, index),
-            filename: file.name,
-            size: file.size,
-            epochs,
-            contentType: file.type,
-          }))}
-          onApprove={handleBatchPaymentApproved}
-          onCancel={handlePaymentCancelled}
-          currentEpochs={epochs}
-        />
-      )}
-    </>
+    </Card>
   );
 }

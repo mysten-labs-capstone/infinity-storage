@@ -57,6 +57,7 @@ export function PaymentApprovalDialog({
   onEpochsChange,
   epochs = 3,
 }: PaymentApprovalDialogProps) {
+  console.log("[PaymentApprovalDialog] Rendered with open:", open, "file:", file?.name);
   const [balance, setBalance] = useState<number>(0);
   const [cost, setCost] = useState<CostInfo | null>(null);
   const [expiration, setExpiration] = useState<ExpirationInfo | null>(null);
@@ -120,6 +121,7 @@ export function PaymentApprovalDialog({
 
   const fetchEpochInfo = async () => {
     try {
+      console.log('[PaymentDialog] Fetching epoch info from:', apiUrl("/api/payment/calculate-expiration"));
       // Fetch epoch info to get the correct epoch duration for the network
       const expirationResponse = await fetch(apiUrl("/api/payment/calculate-expiration"), {
         method: "POST",
@@ -129,10 +131,31 @@ export function PaymentApprovalDialog({
 
       if (expirationResponse.ok) {
         const expirationData = await expirationResponse.json();
+        console.log('[PaymentDialog] Epoch info received:', expirationData);
         setExpiration(expirationData);
+      } else {
+        console.error('[PaymentDialog] Failed to fetch epoch info, status:', expirationResponse.status);
+        const errorText = await expirationResponse.text();
+        console.error('[PaymentDialog] Error response:', errorText);
+        // Set fallback for testnet (1 day per epoch)
+        setExpiration({
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          formattedDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          daysUntilExpiration: 1,
+          epochs: 1,
+          epochDays: 1, // Testnet default
+        });
       }
     } catch (err) {
-      console.error("Failed to fetch epoch info:", err);
+      console.error("[PaymentDialog] Failed to fetch epoch info:", err);
+      // Set fallback for testnet (1 day per epoch)
+      setExpiration({
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        formattedDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        daysUntilExpiration: 1,
+        epochs: 1,
+        epochDays: 1, // Testnet default
+      });
     }
   };
 

@@ -14,6 +14,8 @@ export async function getCurrentEpochInfo(): Promise<EpochInfo> {
   try {
     const { suiClient, network } = await initWalrus();
     
+    console.log(`[EpochService] Initialized Walrus with network: ${network}`);
+    
     // Query the Sui system state to get current epoch information
     const systemState = await suiClient.getLatestSuiSystemState();
     
@@ -31,7 +33,8 @@ export async function getCurrentEpochInfo(): Promise<EpochInfo> {
     const epochStartTime = new Date(epochStartTimestamp);
     const epochEndTime = new Date(epochStartTime.getTime() + epochDurationMs);
     
-    console.log(`[EpochService] Network: ${network}, Epoch Duration: ${epochDurationMs / (24 * 60 * 60 * 1000)} days`);
+    console.log(`[EpochService] Network: ${network}, Epoch Duration: ${epochDurationMs / (24 * 60 * 60 * 1000)} days per epoch`);
+    console.log(`[EpochService] Current Epoch: ${currentEpochNumber}, Starts: ${epochStartTime.toISOString()}, Ends: ${epochEndTime.toISOString()}`);
     
     return {
       currentEpochNumber,
@@ -40,7 +43,7 @@ export async function getCurrentEpochInfo(): Promise<EpochInfo> {
       epochEndTime,
     };
   } catch (error) {
-    console.error("Failed to fetch epoch info from Walrus:", error);
+    console.error("[EpochService] Failed to fetch epoch info from Walrus:", error);
     // Fallback to testnet default (1 day epochs)
     const epochDurationMs = 1 * 24 * 60 * 60 * 1000;
     const currentEpochNumber = Math.floor(Date.now() / epochDurationMs);

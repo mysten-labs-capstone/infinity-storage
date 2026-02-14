@@ -25,10 +25,6 @@ export default defineConfig({
   build: {
     target: 'esnext',
     rollupOptions: {
-      external: [
-        // Exclude CLI scripts from browser build
-        /^.*\/scripts\/.*/
-      ],
       output: {
         entryFileNames: `[name]-${Date.now()}.js`,
         chunkFileNames: `[name]-${Date.now()}.js`,

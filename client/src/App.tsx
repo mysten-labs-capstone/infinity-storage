@@ -29,6 +29,9 @@ import {
   Wallet,
   LogOut,
   DollarSign,
+  Plus,
+  File,
+  FolderUp,
 } from "lucide-react";
 import JSZip from "jszip";
 import { authService } from "./services/authService";
@@ -92,11 +95,14 @@ export default function App() {
   } | null>(null);
   const [insufficientFundsContext, setInsufficientFundsContext] = useState<{
     source: "upload" | "shared";
+    uploadType?: "file" | "folder";
     sharedBlobId?: string;
     sharedShareId?: string | null;
   } | null>(null);
   const [isDraggingExternal, setIsDraggingExternal] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [showMiniNewMenu, setShowMiniNewMenu] = useState(false);
+  const miniNewMenuRef = useRef<HTMLDivElement | null>(null);
   const [downloadingFolderId, setDownloadingFolderId] = useState<string | null>(null);
   const pendingUndoFolderRef = useRef<{ folder: any; folderId: string } | null>(
     null,
@@ -256,6 +262,18 @@ export default function App() {
     }
   }, [showProfileMenu]);
 
+  // Close mini "+ New" menu on click outside
+  useEffect(() => {
+    if (!showMiniNewMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (miniNewMenuRef.current && !miniNewMenuRef.current.contains(e.target as Node)) {
+        setShowMiniNewMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showMiniNewMenu]);
+
   // Check if returning from payment with intent to trigger upload
   useEffect(() => {
     if (
@@ -263,8 +281,10 @@ export default function App() {
       !uploadDialogFromPaymentRef.current
     ) {
       uploadDialogFromPaymentRef.current = true;
-      // Trigger file picker directly
-      window.dispatchEvent(new Event("open-upload-picker"));
+      const event = location.state?.uploadType === "folder"
+        ? "open-folder-upload-picker"
+        : "open-upload-picker";
+      window.dispatchEvent(new Event(event));
     }
   }, [location.state?.openUploadDialog]);
 
@@ -510,8 +530,11 @@ export default function App() {
   useEffect(() => {
     const state = (location.state as any) || {};
 
-    if (state.openUploadPicker) {
-      window.dispatchEvent(new Event("open-upload-picker"));
+    if (state.openUploadPicker || state.openFolderUploadPicker) {
+      const event = state.openFolderUploadPicker
+        ? "open-folder-upload-picker"
+        : "open-upload-picker";
+      window.dispatchEvent(new Event(event));
       navigate(location.pathname + window.location.search, {
         replace: true,
         state: {},
@@ -520,8 +543,10 @@ export default function App() {
     }
     // If returning from payment page with openUploadAfterPayment flag
     if (state.openUploadAfterPayment) {
-      window.dispatchEvent(new Event("open-upload-picker"));
-      // Clear the state so it doesn't re-open on future navigations
+      const event = state.openUploadAfterPayment === "folder"
+        ? "open-folder-upload-picker"
+        : "open-upload-picker";
+      window.dispatchEvent(new Event(event));
       navigate(location.pathname + window.location.search, {
         replace: true,
         state: {},
@@ -533,8 +558,11 @@ export default function App() {
     const openUploadAfterPayment = sessionStorage.getItem(
       "openUploadAfterPayment",
     );
-    if (openUploadAfterPayment === "true") {
-      window.dispatchEvent(new Event("open-upload-picker"));
+    if (openUploadAfterPayment) {
+      const event = openUploadAfterPayment === "folder"
+        ? "open-folder-upload-picker"
+        : "open-upload-picker";
+      window.dispatchEvent(new Event(event));
       sessionStorage.removeItem("openUploadAfterPayment");
       return;
     }
@@ -746,6 +774,7 @@ export default function App() {
 
   const checkMinimumBalanceOrShowDialog = async (context?: {
     source: "upload" | "shared";
+    uploadType?: "file" | "folder";
     sharedBlobId?: string;
     sharedShareId?: string | null;
   }) => {
@@ -776,7 +805,6 @@ export default function App() {
   };
 
   const handleUploadClick = async () => {
-    // Check minimum balance before opening file picker
     if (!user?.id) {
       window.dispatchEvent(new Event("open-upload-picker"));
       return;
@@ -784,10 +812,10 @@ export default function App() {
 
     const hasBalance = await checkMinimumBalanceOrShowDialog({
       source: "upload",
+      uploadType: "file",
     });
     if (!hasBalance) return;
 
-    // Trigger file picker directly
     window.dispatchEvent(new Event("open-upload-picker"));
   };
 
@@ -799,6 +827,7 @@ export default function App() {
 
     const hasBalance = await checkMinimumBalanceOrShowDialog({
       source: "upload",
+      uploadType: "folder",
     });
     if (!hasBalance) return;
 
@@ -1355,14 +1384,40 @@ export default function App() {
 
             <div className="h-px w-8 sm:w-10 bg-zinc-800 my-1 sm:my-1.5" />
 
-            {/* Upload button */}
-            <button
-              onClick={handleUploadClick}
-              className="p-1 sm:p-1.5 hover:bg-zinc-800 rounded-md transition-colors text-gray-300 hover:text-white"
-              title="Upload"
-            >
-              <Upload className="h-3 w-3 sm:h-4 sm:w-4" />
-            </button>
+            {/* Upload button with dropdown */}
+            <div className="relative" ref={miniNewMenuRef}>
+              <button
+                onClick={() => setShowMiniNewMenu((prev) => !prev)}
+                className="p-1 sm:p-1.5 hover:bg-zinc-800 rounded-md transition-colors text-gray-300 hover:text-white"
+                title="Upload"
+              >
+                <Upload className="h-3 w-3 sm:h-4 sm:w-4" />
+              </button>
+              {showMiniNewMenu && (
+                <div className="absolute left-full top-0 ml-2 bg-zinc-900 rounded-lg shadow-xl border border-zinc-800 py-1.5 z-50 min-w-[160px]">
+                  <button
+                    className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:bg-zinc-800 text-gray-300 text-left transition-colors"
+                    onClick={() => {
+                      setShowMiniNewMenu(false);
+                      handleUploadClick();
+                    }}
+                  >
+                    <File className="h-4 w-4 text-gray-400" />
+                    Upload File
+                  </button>
+                  <button
+                    className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:bg-zinc-800 text-gray-300 text-left transition-colors"
+                    onClick={() => {
+                      setShowMiniNewMenu(false);
+                      handleFolderUploadClick();
+                    }}
+                  >
+                    <FolderUp className="h-4 w-4 text-gray-400" />
+                    Upload Folder
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* All Files / Your Storage */}
             <button
@@ -1424,17 +1479,6 @@ export default function App() {
               title="Expiring Soon"
             >
               <AlertTriangle className="h-3 w-3 sm:h-4 sm:w-4" />
-            </button>
-
-            <div className="h-px w-8 sm:w-10 bg-zinc-800 my-1 sm:my-1.5" />
-
-            {/* Add folder button */}
-            <button
-              onClick={() => handleCreateFolder(selectedFolderId)}
-              className="p-1 sm:p-1.5 hover:bg-zinc-800 rounded-md transition-colors text-gray-300 hover:text-white"
-              title="Create folder"
-            >
-              <FolderPlus className="h-3 w-3 sm:h-4 sm:w-4" />
             </button>
 
             {/* Folder icons (scrollable if many) */}
@@ -1522,6 +1566,7 @@ export default function App() {
                 folders={folders}
                 key={folderRefreshKey}
                 onUploadClick={handleUploadClick}
+                onFolderUploadClick={handleFolderUploadClick}
                 onSelectView={(view) => {
                   setCurrentView(view);
                   setSelectedFolderId(null);
@@ -1672,8 +1717,10 @@ export default function App() {
                 }),
               );
             } else {
-              // Set flag in sessionStorage so upload dialog opens when returning from payment
-              sessionStorage.setItem("openUploadAfterPayment", "true");
+              sessionStorage.setItem(
+                "openUploadAfterPayment",
+                insufficientFundsContext?.uploadType === "folder" ? "folder" : "file",
+              );
             }
             navigate("/payment");
           }}

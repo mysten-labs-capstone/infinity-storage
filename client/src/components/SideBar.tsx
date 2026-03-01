@@ -25,6 +25,9 @@ import {
   Loader2,
   Check,
   X,
+  Plus,
+  File,
+  FolderUp,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { apiUrl } from "../config/api";
@@ -51,6 +54,7 @@ interface FolderTreeProps {
   onFolderDeletedOptimistic?: (folderId: string) => void;
   onRequestFolderDelete?: (folderId: string, folderName: string) => void;
   onUploadClick?: () => void;
+  onFolderUploadClick?: () => void;
   folders: FolderNode[];
   onSelectView?: (
     view:
@@ -89,6 +93,7 @@ export default function FolderTree({
   onFolderDeletedOptimistic,
   onRequestFolderDelete,
   onUploadClick,
+  onFolderUploadClick,
   folders: propFolders,
   onSelectView,
   currentView,
@@ -112,6 +117,8 @@ export default function FolderTree({
   const [dragOverRoot, setDragOverRoot] = useState(false);
   const [dragOverFoldersLabel, setDragOverFoldersLabel] = useState(false);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [showNewMenu, setShowNewMenu] = useState(false);
+  const newMenuRef = useRef<HTMLDivElement | null>(null);
   const { clearPrivateKey } = useAuth();
   const navigate = useNavigate();
   const [balance, setBalance] = useState<number | null>(null);
@@ -489,6 +496,18 @@ export default function FolderTree({
     }
   }, [showProfileMenu]);
 
+  // Close "+ New" menu on click outside
+  useEffect(() => {
+    if (!showNewMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node)) {
+        setShowNewMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showNewMenu]);
+
   // Custom scroll rail/thumb (visible even when OS hides native scrollbar)
   const scrollInnerRef = useRef<HTMLDivElement | null>(null);
   const [thumbTop, setThumbTop] = useState(0);
@@ -551,22 +570,51 @@ export default function FolderTree({
           )}
         </div>
         {onUploadClick && (
-          <div className="w-full mt-4">
+          <div className="w-full mt-4 relative" ref={newMenuRef}>
             <Button
-              onClick={() => {
-                const path = window.location.pathname;
-                if (!onUploadClick) return;
-                if (path === "/" || path.startsWith("/home")) {
-                  onUploadClick();
-                } else {
-                  navigate("/home/upload");
-                }
-              }}
-              className="upload-button-main w-full gap-2"
+              onClick={() => setShowNewMenu((prev) => !prev)}
+              className="upload-button-main w-full gap-2 justify-start"
             >
               <Upload className="h-4 w-4" />
               Upload
+              <ChevronDown className={`h-3.5 w-3.5 ml-auto transition-transform ${showNewMenu ? "rotate-180" : ""}`} />
             </Button>
+            {showNewMenu && (
+              <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-900 rounded-lg shadow-xl border border-zinc-800 py-1.5 z-50">
+                <button
+                  className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:bg-zinc-800 text-gray-300 text-left transition-colors"
+                  onClick={() => {
+                    setShowNewMenu(false);
+                    const path = window.location.pathname;
+                    if (path === "/" || path.startsWith("/home")) {
+                      onUploadClick();
+                    } else {
+                      navigate("/home/upload");
+                    }
+                  }}
+                >
+                  <File className="h-4 w-4 text-gray-400" />
+                  Upload File
+                </button>
+                <button
+                  className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:bg-zinc-800 text-gray-300 text-left transition-colors"
+                  onClick={() => {
+                    setShowNewMenu(false);
+                    if (onFolderUploadClick) {
+                      const path = window.location.pathname;
+                      if (path === "/" || path.startsWith("/home")) {
+                        onFolderUploadClick();
+                      } else {
+                        navigate("/home", { state: { openFolderUploadPicker: true } });
+                      }
+                    }
+                  }}
+                >
+                  <FolderUp className="h-4 w-4 text-gray-400" />
+                  Upload Folder
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

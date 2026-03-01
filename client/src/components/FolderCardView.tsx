@@ -39,6 +39,8 @@ import {
   Home,
   QrCode,
   X,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import JSZip from "jszip";
 import { Button } from "./ui/button";
@@ -149,6 +151,8 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
+
+type SortField = "name" | "size" | "uploadedAt";
 
 function truncateFileName(name: string, maxLength: number = 70): string {
   if (name.length <= maxLength) return name;
@@ -397,6 +401,13 @@ export default function FolderCardView({
   );
   const lastSelectedFileIdRef = useRef<string | null>(null);
   const lastSelectedFolderIdRef = useRef<string | null>(null);
+
+  // Sort & filter state
+  const [sortBy, setSortBy] = useState<SortField>("uploadedAt");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const bulkDeleteSnapshotRef = useRef<FileItem[]>([]);
 
   // Drag-to-select state
   const [isSelecting, setIsSelecting] = useState(false);
@@ -832,36 +843,47 @@ export default function FolderCardView({
 
   // Get folders at current level (only show in 'all' view)
   const currentLevelFolders = useMemo(
-    () =>
-      currentView === "all"
-        ? currentFolderId === null
-          ? folders
-              .filter((f) => f.parentId === null)
-              .filter((f) => !locallyMovedFolderIds.has(f.id))
-          : (() => {
-              // Find the folder with matching ID and return its direct children
-              const targetFolder = findFolderById(folders, currentFolderId);
-              if (!targetFolder) {
-                console.warn(
-                  "[FolderCardView] Could not find folder with ID:",
-                  currentFolderId,
-                  "in folders:",
-                  folders,
-                );
-              }
-              const result = targetFolder
-                ? targetFolder.children.filter(
-                    (f) => !locallyMovedFolderIds.has(f.id),
-                  )
-                : [];
-              return result;
-            })()
-        : [], // Hide folders in special views
+    () => {
+      let base: FolderNode[] =
+        currentView === "all"
+          ? currentFolderId === null
+            ? folders
+                .filter((f) => f.parentId === null)
+                .filter((f) => !locallyMovedFolderIds.has(f.id))
+            : (() => {
+                const targetFolder = findFolderById(folders, currentFolderId);
+                if (!targetFolder) {
+                  console.warn(
+                    "[FolderCardView] Could not find folder with ID:",
+                    currentFolderId,
+                    "in folders:",
+                    folders,
+                  );
+                }
+                return targetFolder
+                  ? targetFolder.children.filter(
+                      (f) => !locallyMovedFolderIds.has(f.id),
+                    )
+                  : [];
+              })()
+          : [];
+
+      if (sortBy === "name") {
+        base = [...base].sort((a, b) => {
+          const cmp = a.name.localeCompare(b.name);
+          return sortDirection === "asc" ? cmp : -cmp;
+        });
+      }
+
+      return base;
+    },
     [
       currentView,
       currentFolderId,
       folders,
       locallyMovedFolderIds,
+      sortBy,
+      sortDirection,
       findFolderById,
     ],
   );
@@ -1201,11 +1223,34 @@ export default function FolderCardView({
     }
   }, [currentLevelFolders]);
 
-  // Get files at current level
-  const currentLevelFiles =
-    currentView === "all"
-      ? effectiveFiles.filter((f) => f.folderId === currentFolderId)
-      : effectiveFiles; // In special views, show all filtered files (filtering done in App.tsx)
+  // Get files at current level, then apply sort & filter
+  const currentLevelFiles = useMemo(() => {
+    let base =
+      currentView === "all"
+        ? effectiveFiles.filter((f) => f.folderId === currentFolderId)
+        : effectiveFiles;
+
+    // Sorting
+    const sorted = [...base].sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case "name":
+          cmp = a.name.localeCompare(b.name);
+          break;
+        case "size":
+          cmp = a.size - b.size;
+          break;
+        case "uploadedAt":
+          cmp =
+            new Date(a.uploadedAt).getTime() -
+            new Date(b.uploadedAt).getTime();
+          break;
+      }
+      return sortDirection === "asc" ? cmp : -cmp;
+    });
+
+    return sorted;
+  }, [effectiveFiles, currentView, currentFolderId, sortBy, sortDirection]);
 
   const newFileIds = useMemo(() => {
     const newIds = new Set<string>();
@@ -2479,6 +2524,128 @@ export default function FolderCardView({
     [privateKey, requestReauth],
   );
 
+  const bulkDownloadSelected = useCallback(async () => {
+    if (!privateKey || privateKey.trim() === "") {
+      requestReauth(() => bulkDownloadSelected());
+      return;
+    }
+
+    const selectedFiles = currentLevelFiles.filter((f) =>
+      selectedFileIds.has(f.blobId),
+    );
+    if (selectedFiles.length === 0) return;
+
+    if (selectedFiles.length === 1) {
+      const f = selectedFiles[0];
+      downloadFile(f.blobId, f.name, f.encrypted);
+      return;
+    }
+
+    setBulkDownloading(true);
+    try {
+      const zip = new JSZip();
+      const user = authService.getCurrentUser();
+
+      for (const file of selectedFiles) {
+        try {
+          const res = await downloadBlob(
+            file.blobId,
+            privateKey || "",
+            file.name,
+            user?.id,
+          );
+          if (!res.ok || ("presigned" in res && res.presigned)) continue;
+
+          let fileBlob = await (res as Response).blob();
+          if (privateKey && fileBlob.size > 0) {
+            const result = await decryptWalrusBlob(
+              fileBlob,
+              privateKey,
+              file.name || file.blobId,
+            );
+            if (result) fileBlob = result.blob;
+          }
+          zip.file(file.name, fileBlob);
+        } catch (err) {
+          console.error(`Failed to download ${file.name}:`, err);
+        }
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(zipBlob);
+      a.download = `files-${selectedFiles.length}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      onShowToast?.({ message: `Downloaded ${selectedFiles.length} files` });
+    } catch (err) {
+      console.error("Bulk download failed:", err);
+      onShowToast?.({ message: "Download failed" });
+    } finally {
+      setBulkDownloading(false);
+    }
+  }, [
+    privateKey,
+    requestReauth,
+    currentLevelFiles,
+    selectedFileIds,
+    downloadFile,
+    onShowToast,
+  ]);
+
+  const bulkDeletableFiles = useMemo(
+    () =>
+      currentLevelFiles.filter(
+        (f) =>
+          selectedFileIds.has(f.blobId) &&
+          f.status !== "pending" &&
+          f.status !== "processing",
+      ),
+    [currentLevelFiles, selectedFileIds],
+  );
+
+  const promptBulkDelete = useCallback(() => {
+    if (bulkDeletableFiles.length === 0) {
+      onShowToast?.({
+        message: "Selected files are still uploading and cannot be deleted yet",
+      });
+      return;
+    }
+    bulkDeleteSnapshotRef.current = [...bulkDeletableFiles];
+    setBulkDeleteDialogOpen(true);
+  }, [bulkDeletableFiles, onShowToast]);
+
+  const confirmBulkDelete = useCallback(async () => {
+    const filesToDelete = bulkDeleteSnapshotRef.current;
+    bulkDeleteSnapshotRef.current = [];
+    if (filesToDelete.length === 0) return;
+
+    setBulkDeleteDialogOpen(false);
+
+    const user = authService.getCurrentUser();
+    if (!user?.id) return;
+
+    for (const file of filesToDelete) {
+      setLocallyDeletedBlobIds((prev) => new Set(prev).add(file.blobId));
+      removeCachedFile(file.blobId);
+    }
+
+    setSelectedFileIds(new Set());
+    setSelectedFolderIds(new Set());
+    onFileDeleted?.(filesToDelete[0].blobId);
+    onShowToast?.({ message: `Deleted ${filesToDelete.length} files` });
+
+    for (const file of filesToDelete) {
+      try {
+        await deleteBlob(file.blobId, user.id);
+      } catch (err) {
+        console.error(`Failed to delete ${file.name}:`, err);
+      }
+    }
+  }, [onFileDeleted, onShowToast]);
+
   const downloadFolder = useCallback(
     async (folderId: string) => {
       if (!privateKey || privateKey.trim() === "") {
@@ -3599,7 +3766,7 @@ export default function FolderCardView({
   return (
     <div
       ref={selectionContainerRef}
-      className={`space-y-6 relative min-h-full pb-16 ${draggedFile ? "dragging-file" : ""} ${isSelecting ? "cursor-crosshair" : ""} ${hasSelection ? "hover-disabled" : "hover-enabled"} ${currentView === "all" ? "-ml-4 pl-4 sm:-ml-6 sm:pl-6 lg:-ml-8 lg:pl-8" : ""}`}
+      className={`space-y-4 relative min-h-full pb-16 ${draggedFile ? "dragging-file" : ""} ${isSelecting ? "cursor-crosshair" : ""} ${hasSelection ? "hover-disabled" : "hover-enabled"} ${currentView === "all" ? "-ml-4 pl-4 sm:-ml-6 sm:pl-6 lg:-ml-8 lg:pl-8" : ""}`}
       style={
         {
           userSelect: currentView === "all" ? "none" : "auto",
@@ -3665,6 +3832,44 @@ export default function FolderCardView({
         </div>
       )}
 
+      {/* Sort Toolbar */}
+      {(currentLevelFiles.length > 0 || currentLevelFolders.length > 0 || currentFolderId !== null) && (
+        <div className="flex items-center gap-2" onMouseDown={(e) => e.stopPropagation()}>
+          {(
+            [
+              { key: "name" as SortField, label: "Name" },
+              { key: "size" as SortField, label: "Size" },
+              { key: "uploadedAt" as SortField, label: "Date Added" },
+            ] as const
+          ).map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => {
+                if (sortBy === key) {
+                  setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+                } else {
+                  setSortBy(key);
+                  setSortDirection(key === "name" ? "asc" : "desc");
+                }
+              }}
+              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
+                sortBy === key
+                  ? "bg-emerald-900/40 border-emerald-700/50 text-emerald-300"
+                  : "border-zinc-700/50 text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
+              }`}
+            >
+              {label}
+              {sortBy === key &&
+                (sortDirection === "asc" ? (
+                  <ArrowUp className="h-3 w-3" />
+                ) : (
+                  <ArrowDown className="h-3 w-3" />
+                ))}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Breadcrumb Navigation - only show for folder views */}
       {currentView === "all" && currentFolderId !== null && (
         <div className="flex items-center gap-2 text-sm">
@@ -3681,7 +3886,6 @@ export default function FolderCardView({
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "move";
                     setDragOverBreadcrumbId(item.id ?? "root");
-                    // Auto-scroll on drag
                     startAutoScroll(e.clientX, e.clientY);
                   }
                 }}
@@ -3690,7 +3894,6 @@ export default function FolderCardView({
                   setDragOverBreadcrumbId(null);
                 }}
                 onDrop={async (e) => {
-                  // Check if this is an internal drag - if not, let it bubble to parent
                   const isInternalDrag =
                     e.dataTransfer.types.includes(
                       "application/x-walrus-file",
@@ -3700,17 +3903,13 @@ export default function FolderCardView({
                     );
 
                   if (!isInternalDrag) {
-                    // External file drop - let it bubble to parent handler
                     return;
                   }
 
                   e.preventDefault();
                   e.stopPropagation();
-                  // Allow dropping files and folders on breadcrumb items (including root)
-                  // Handle file drops - use all selected files, not just draggedFile
                   const draggedFileIds = Array.from(selectedFileIds);
                   if (draggedFileIds.length > 0) {
-                    // Group files by their current folder and move each group separately
                     const filesBySourceFolder = new Map<
                       string | null,
                       string[]
@@ -3731,7 +3930,6 @@ export default function FolderCardView({
                       }
                     }
 
-                    // Move each group of files from their source folder to the target folder
                     for (const [
                       sourceFolder,
                       fileIds,
@@ -3742,7 +3940,6 @@ export default function FolderCardView({
                     }
                     setDraggedFile(null);
                   }
-                  // Handle folder drops
                   const draggedFolderIds = Array.from(selectedFolderIds);
                   if (draggedFolderIds.length > 0) {
                     for (const folderIdToMove of draggedFolderIds) {
@@ -3752,7 +3949,6 @@ export default function FolderCardView({
                           folderIdToMove,
                         );
                         if (folderToMove) {
-                          // Only move if not already in target location
                           if (folderToMove.parentId !== item.id) {
                             await moveFolderToFolder(
                               folderIdToMove,
@@ -3783,6 +3979,46 @@ export default function FolderCardView({
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Multi-select action bar — fixed bottom center */}
+      {hasSelection && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-4 py-2.5 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-xl shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+          <span className="text-xs text-gray-300 font-medium whitespace-nowrap">
+            {selectedFileIds.size + selectedFolderIds.size} selected
+          </span>
+          <div className="h-3.5 w-px bg-zinc-700" />
+          {selectedFileIds.size > 0 && (
+            <button
+              onClick={bulkDownloadSelected}
+              disabled={bulkDownloading}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-emerald-700/50 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-300 transition-colors disabled:opacity-50"
+            >
+              {bulkDownloading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Download className="h-3 w-3" />
+              )}
+              {bulkDownloading ? "Downloading..." : "Download"}
+            </button>
+          )}
+          {selectedFileIds.size > 0 && (
+            <button
+              onClick={promptBulkDelete}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-red-800/50 bg-red-900/30 hover:bg-red-900/50 text-red-400 transition-colors"
+            >
+              <Trash2 className="h-3 w-3" />
+              Delete
+            </button>
+          )}
+          <button
+            onClick={clearSelection}
+            className="p-1 rounded-lg hover:bg-zinc-700 text-gray-400 hover:text-white transition-colors"
+            title="Clear selection"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 
@@ -3846,8 +4082,8 @@ export default function FolderCardView({
             });
           }}
         >
-          {/* Spacer above header so drag selection can start in this area */}
-          <div className="h-4" onMouseDown={handleMouseDown} />
+          {/* Small spacer for drag selection start area */}
+          <div className="h-2" onMouseDown={handleMouseDown} />
           {currentFolderId === null && (
             <h3 className="text-sm font-medium text-gray-300 mb-3">Folders</h3>
           )}
@@ -4211,6 +4447,17 @@ export default function FolderCardView({
           }}
         />
       )}
+
+      {/* Bulk delete confirm dialog */}
+      <DeleteConfirmDialog
+        open={bulkDeleteDialogOpen}
+        onOpenChange={setBulkDeleteDialogOpen}
+        fileName={`${bulkDeletableFiles.length} file${bulkDeletableFiles.length === 1 ? "" : "s"}`}
+        title={`Delete ${bulkDeletableFiles.length} file${bulkDeletableFiles.length === 1 ? "" : "s"}?`}
+        description="This will permanently remove the selected files from Walrus storage"
+        confirmLabel="Delete All"
+        onConfirm={confirmBulkDelete}
+      />
 
       {fileToDelete && (
         <DeleteConfirmDialog

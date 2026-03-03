@@ -48,6 +48,23 @@ export default function App() {
   const [searchParams] = useSearchParams();
   const uploadDialogFromPaymentRef = useRef(false);
   const folderRefreshTimeoutRef = useRef<number | null>(null);
+  const folderLoadRequestIdRef = useRef(0);
+  const recentlyCreatedFoldersRef = useRef<
+    Map<
+      string,
+      {
+        id: string;
+        name: string;
+        parentId: string | null;
+        color: string | null;
+        fileCount: number;
+        childCount: number;
+        children: any[];
+        createdAt: number;
+      }
+    >
+  >(new Map());
+  const RECENTLY_CREATED_FOLDER_TTL_MS = 15000;
   const [uploadedFiles, setUploadedFiles] = useState<CachedFile[]>([]);
   const [epochs, setEpochs] = useState(3); // Default: 3 epochs = 90 days
   const daysPerEpoch = useDaysPerEpoch();
@@ -336,17 +353,89 @@ export default function App() {
     loadPrivateKey();
   }, [user?.id, privateKey, setPrivateKey]);
 
+  const insertFolderIntoTree = useCallback((tree: any[], folderNode: any) => {
+    if (folderNode.parentId === null) {
+      return [...tree, folderNode].sort((a, b) =>
+        (a.name ?? "").localeCompare(b.name ?? ""),
+      );
+    }
+
+    const addToParent = (items: any[]): any[] =>
+      items.map((item) => {
+        if (item.id === folderNode.parentId) {
+          return {
+            ...item,
+            children: [...(item.children ?? []), folderNode].sort((a, b) =>
+              (a.name ?? "").localeCompare(b.name ?? ""),
+            ),
+            childCount: (item.childCount ?? item.children?.length ?? 0) + 1,
+          };
+        }
+        if (item.children?.length) {
+          return { ...item, children: addToParent(item.children) };
+        }
+        return item;
+      });
+
+    return addToParent(tree);
+  }, []);
+
+  const mergeRecentlyCreatedFolders = useCallback(
+    (tree: any[]) => {
+      const now = Date.now();
+
+      const hasFolderId = (items: any[], id: string): boolean => {
+        for (const item of items) {
+          if (item.id === id) return true;
+          if (item.children?.length && hasFolderId(item.children, id)) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      let mergedTree = tree;
+      for (const [id, created] of recentlyCreatedFoldersRef.current.entries()) {
+        if (now - created.createdAt > RECENTLY_CREATED_FOLDER_TTL_MS) {
+          recentlyCreatedFoldersRef.current.delete(id);
+          continue;
+        }
+        if (hasFolderId(mergedTree, id)) {
+          recentlyCreatedFoldersRef.current.delete(id);
+          continue;
+        }
+        mergedTree = insertFolderIntoTree(mergedTree, {
+          id: created.id,
+          name: created.name,
+          parentId: created.parentId,
+          color: created.color,
+          fileCount: created.fileCount,
+          childCount: created.childCount,
+          children: created.children,
+        });
+      }
+
+      return mergedTree;
+    },
+    [insertFolderIntoTree],
+  );
+
   const loadFolders = async () => {
     if (!user?.id) {
       setFolders([]);
       return;
     }
+    const requestId = ++folderLoadRequestIdRef.current;
     try {
       const res = await fetch(apiUrl(`/api/folders/tree?userId=${user.id}`));
       if (res.ok) {
         const data = await res.json();
-        const tree = buildFolderTree(data.folders ?? []);
-        setFolders(tree);
+        const tree = mergeRecentlyCreatedFolders(
+          buildFolderTree(data.folders ?? []),
+        );
+        if (requestId === folderLoadRequestIdRef.current) {
+          setFolders(tree);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch folders:", err);
@@ -722,7 +811,6 @@ export default function App() {
     parentId: string | null;
     color: string | null;
   }) => {
-    setFolderRefreshKey((prev) => prev + 1);
     setCreateFolderDialogOpen(false);
 
     // Optimistically add the new folder to state immediately
@@ -736,6 +824,11 @@ export default function App() {
         childCount: 0,
         children: [],
       };
+
+      recentlyCreatedFoldersRef.current.set(newFolder.id, {
+        ...folderNode,
+        createdAt: Date.now(),
+      });
 
       setFolders((prev) => {
         // If it's a root folder, add directly
@@ -771,10 +864,6 @@ export default function App() {
         return updated;
       });
     }
-
-    // Sync with server in background (without delaying optimistic UI)
-    void loadFiles();
-    void loadFolders();
   };
 
   const checkMinimumBalanceOrShowDialog = async (context?: {
@@ -865,8 +954,9 @@ export default function App() {
         blobIds.includes(f.blobId) ? { ...f, folderId: newFolderId } : f,
       ),
     );
+
     showToast({
-      message: blobIds.length > 1 ? "Files moved" : "File moved",
+      message: "File moved",
     });
   };
 
@@ -1175,7 +1265,9 @@ export default function App() {
       if (res.ok) {
         handleFolderDeletedOptimistic(folderId);
         handleFolderDeleted();
-        await loadFolders();
+        // Don't call loadFolders() here - the optimistic update already handles the UI
+        // and calling loadFolders() can cause the folder to briefly reappear if the
+        // backend hasn't fully propagated the deletion yet
         return true;
       }
 

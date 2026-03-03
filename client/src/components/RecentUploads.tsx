@@ -23,8 +23,21 @@ import { useCallback, useState, useRef } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { downloadBlob, deleteBlob } from "../services/walrusApi";
 import { authService } from "../services/authService";
+import { apiUrl } from "../config/api";
 import { decryptWalrusBlob } from "../services/decryptWalrusBlob";
 import { removeCachedFile } from "../lib/fileCache";
+import { Button } from "./ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "./ui/card";
+import { ShareDialog } from "./ShareDialog";
+import { ExtendDurationDialog } from "./ExtendDurationDialog";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import MoveFileDialog from "./MoveFileDialog";
 import {
   StatusBadgeTooltip,
   STATUS_BADGE_TOOLTIPS,
@@ -86,8 +99,12 @@ export default function RecentUploads({
   // Store latest downloadFile ref to avoid stale closure in callbacks
   const downloadFileRef =
     useRef<
-      (blobId: string, name?: string, encrypted?: boolean) => Promise<void>
-    >();
+      (
+        blobId: string,
+        name?: string,
+        encrypted?: boolean,
+      ) => Promise<void> | null
+    >(null);
 
   // Share dialog state
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -583,7 +600,9 @@ YOUR FILES:
                         {f.name}
                       </p>
                       {f.encrypted && (
-                        <StatusBadgeTooltip title={STATUS_BADGE_TOOLTIPS.encrypted}>
+                        <StatusBadgeTooltip
+                          title={STATUS_BADGE_TOOLTIPS.encrypted}
+                        >
                           <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
                             <Lock className="h-3 w-3" />
                             Encrypted
@@ -598,7 +617,9 @@ YOUR FILES:
 
                         if (isInWalrus) {
                           return (
-                            <StatusBadgeTooltip title={STATUS_BADGE_TOOLTIPS.walrus}>
+                            <StatusBadgeTooltip
+                              title={STATUS_BADGE_TOOLTIPS.walrus}
+                            >
                               <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
                                 Walrus
                               </span>
@@ -606,15 +627,22 @@ YOUR FILES:
                           );
                         } else if (f.status === "processing") {
                           return (
-                            <StatusBadgeTooltip title={STATUS_BADGE_TOOLTIPS.processing}>
+                            <StatusBadgeTooltip
+                              title={STATUS_BADGE_TOOLTIPS.processing}
+                            >
                               <span className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">
                                 Processing
                               </span>
                             </StatusBadgeTooltip>
                           );
-                        } else if (f.status === "failed" || f.status === "pending") {
+                        } else if (
+                          f.status === "failed" ||
+                          f.status === "pending"
+                        ) {
                           return (
-                            <StatusBadgeTooltip title={STATUS_BADGE_TOOLTIPS.pending}>
+                            <StatusBadgeTooltip
+                              title={STATUS_BADGE_TOOLTIPS.pending}
+                            >
                               <span className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">
                                 <Loader2 className="h-3 w-3 animate-spin" />
                                 Pending
@@ -623,7 +651,9 @@ YOUR FILES:
                           );
                         } else if (isInS3) {
                           return (
-                            <StatusBadgeTooltip title={STATUS_BADGE_TOOLTIPS.s3}>
+                            <StatusBadgeTooltip
+                              title={STATUS_BADGE_TOOLTIPS.s3}
+                            >
                               <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
                                 <HardDrive className="h-3 w-3" />
                                 S3
@@ -881,7 +911,7 @@ YOUR FILES:
         <>
           <DeleteConfirmDialog
             open={deleteDialogOpen}
-            onOpenChange={(open) => {
+            onOpenChange={(open: boolean) => {
               setDeleteDialogOpen(open);
               if (!open) {
                 setFileToDelete(null);

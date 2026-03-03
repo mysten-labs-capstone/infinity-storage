@@ -656,8 +656,11 @@ export default function FolderCardView({
                 "",
                 undefined,
                 user?.id,
+                { preferPresignedUrl: false },
               );
-              if (!blobRes.ok) throw new Error("Failed to download blob");
+              if (!(blobRes instanceof Response) || !blobRes.ok) {
+                throw new Error("Failed to download blob");
+              }
               const blobData = await blobRes.blob();
               const fileKeyBase64url = await exportFileKeyForShare(
                 blobData,
@@ -1198,7 +1201,7 @@ export default function FolderCardView({
     return map;
   }, [files, locallyDeletedBlobIds, locallyMovedBlobIds]);
 
-  const renderedFolderIdsRef = useRef<Set<string>>(new Set());
+  const knownFolderIdsRef = useRef<Set<string>>(new Set());
   const renderedFileIdsRef = useRef<Set<string>>(new Set());
   const prevFolderIdRef = useRef<string | null | undefined>(undefined);
   const prevViewRef = useRef<string | undefined>(undefined);
@@ -1207,16 +1210,29 @@ export default function FolderCardView({
     prevFolderIdRef.current !== currentFolderId ||
     prevViewRef.current !== currentView
   ) {
-    renderedFolderIdsRef.current = new Set();
     renderedFileIdsRef.current = new Set();
     prevFolderIdRef.current = currentFolderId;
     prevViewRef.current = currentView;
   }
 
+  const allFolderIds = useMemo(() => {
+    const ids = new Set<string>();
+    const walk = (folderList: FolderNode[]) => {
+      for (const folder of folderList) {
+        ids.add(folder.id);
+        if (folder.children.length > 0) {
+          walk(folder.children);
+        }
+      }
+    };
+    walk(folders);
+    return ids;
+  }, [folders]);
+
   const newFolderIds = useMemo(() => {
     const newIds = new Set<string>();
     for (const folder of currentLevelFolders) {
-      if (!renderedFolderIdsRef.current.has(folder.id)) {
+      if (!knownFolderIdsRef.current.has(folder.id)) {
         newIds.add(folder.id);
       }
     }
@@ -1224,10 +1240,11 @@ export default function FolderCardView({
   }, [currentLevelFolders]);
 
   useEffect(() => {
-    for (const folder of currentLevelFolders) {
-      renderedFolderIdsRef.current.add(folder.id);
-    }
-  }, [currentLevelFolders]);
+    knownFolderIdsRef.current = new Set([
+      ...knownFolderIdsRef.current,
+      ...Array.from(allFolderIds),
+    ]);
+  }, [allFolderIds]);
 
   // Get files at current level, then apply sort & filter
   const currentLevelFiles = useMemo(() => {
@@ -3158,8 +3175,9 @@ export default function FolderCardView({
                           "",
                           undefined,
                           user?.id,
+                          { preferPresignedUrl: false },
                         );
-                        if (!blobRes.ok)
+                        if (!(blobRes instanceof Response) || !blobRes.ok)
                           throw new Error("Failed to download blob");
                         const blobData = await blobRes.blob();
                         const fileKeyBase64url = await exportFileKeyForShare(

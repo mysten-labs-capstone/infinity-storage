@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 import { encryptFile, extractFileIdFromBlob } from "../services/crypto";
 import { authService } from "../services/authService";
 import { registerFile, findUserRegistry } from "../services/suiContract";
+import { clearBalanceCache } from "../services/balanceService";
 
 export type QueuedUpload = {
   id: string;
@@ -589,8 +590,18 @@ export function useUploadQueue() {
             );
           }
 
-          // Trigger balance update
-          window.dispatchEvent(new Event("balance-updated"));
+          // Clear balance cache and refresh transactions after payment
+          // Small delay to ensure database replication completes
+          console.log(
+            "[useUploadQueue] Upload succeeded, waiting 1s for DB sync before clearing cache",
+          );
+          setTimeout(() => {
+            console.log(
+              "[useUploadQueue] Clearing balance cache and dispatching transactions:updated",
+            );
+            clearBalanceCache();
+            window.dispatchEvent(new Event("transactions:updated"));
+          }, 1000);
 
           // S3 upload succeeded — remove from queue immediately.
           // The server's trigger-pending handles Walrus

@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
-import { DollarSign, AlertCircle, Loader2, Clock } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import {
+  DollarSign,
+  AlertCircle,
+  Loader2,
+  Clock,
+  Wallet,
+  FileText,
+  CalendarClock,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +18,6 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Button } from "./ui/button";
-import { Slider } from "./ui/slider";
 import { apiUrl } from "../config/api";
 import { authService } from "../services/authService";
 import { getBalance } from "../services/balanceService";
@@ -58,14 +66,19 @@ export function PaymentApprovalDialog({
   onEpochsChange,
   epochs = 3,
 }: PaymentApprovalDialogProps) {
-  console.log("[PaymentApprovalDialog] Rendered with open:", open, "file:", file?.name);
+  console.log(
+    "[PaymentApprovalDialog] Rendered with open:",
+    open,
+    "file:",
+    file?.name,
+  );
   const [balance, setBalance] = useState<number>(0);
   const [cost, setCost] = useState<CostInfo | null>(null);
   const [expiration, setExpiration] = useState<ExpirationInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedDays, setSelectedDays] = useState<number>(14);
-  const [tempDays, setTempDays] = useState<string>('14');
+  const [tempDays, setTempDays] = useState<string>("14");
   const [isInitialized, setIsInitialized] = useState(false);
   const daysPerEpoch = useDaysPerEpoch();
   const epochDays = expiration?.epochDays || daysPerEpoch || 14;
@@ -85,6 +98,10 @@ export function PaymentApprovalDialog({
   const tempDaysNum = Number(tempDays) || 0;
   const tempEpochs = tempDaysNum > 0 ? calculateEpochs(tempDaysNum) : 0;
   const isValidDays = tempDaysNum >= 1 && tempDaysNum <= maxDays;
+  
+  // Check for insufficient balance
+  const hasInsufficientFunds = !loading && cost && balance < cost.costUSD;
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (open && file && !isInitialized) {
@@ -133,26 +150,41 @@ export function PaymentApprovalDialog({
 
   const fetchEpochInfo = async () => {
     try {
-      console.log('[PaymentDialog] Fetching epoch info from:', apiUrl("/api/payment/calculate-expiration"));
+      console.log(
+        "[PaymentDialog] Fetching epoch info from:",
+        apiUrl("/api/payment/calculate-expiration"),
+      );
       // Fetch epoch info to get the correct epoch duration for the network
-      const expirationResponse = await fetch(apiUrl("/api/payment/calculate-expiration"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ epochs: 1 }),
-      });
+      const expirationResponse = await fetch(
+        apiUrl("/api/payment/calculate-expiration"),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ epochs: 1 }),
+        },
+      );
 
       if (expirationResponse.ok) {
         const expirationData = await expirationResponse.json();
-        console.log('[PaymentDialog] Epoch info received:', expirationData);
+        console.log("[PaymentDialog] Epoch info received:", expirationData);
         setExpiration(expirationData);
       } else {
-        console.error('[PaymentDialog] Failed to fetch epoch info, status:', expirationResponse.status);
+        console.error(
+          "[PaymentDialog] Failed to fetch epoch info, status:",
+          expirationResponse.status,
+        );
         const errorText = await expirationResponse.text();
-        console.error('[PaymentDialog] Error response:', errorText);
+        console.error("[PaymentDialog] Error response:", errorText);
         // Set fallback for testnet (1 day per epoch)
         setExpiration({
           expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-          formattedDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          formattedDate: new Date(
+            Date.now() + 24 * 60 * 60 * 1000,
+          ).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          }),
           daysUntilExpiration: 1,
           epochs: 1,
           epochDays: 1, // Testnet default
@@ -163,7 +195,13 @@ export function PaymentApprovalDialog({
       // Set fallback for testnet (1 day per epoch)
       setExpiration({
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        formattedDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        formattedDate: new Date(
+          Date.now() + 24 * 60 * 60 * 1000,
+        ).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }),
         daysUntilExpiration: 1,
         epochs: 1,
         epochDays: 1, // Testnet default
@@ -176,6 +214,7 @@ export function PaymentApprovalDialog({
 
     setLoading(true);
     setError(null);
+    setCost(null); // Clear old cost to prevent showing stale data
 
     try {
       // Fetch cost
@@ -196,11 +235,14 @@ export function PaymentApprovalDialog({
       }
 
       // Fetch expiration date for the selected epochs
-      const expirationResponse = await fetch(apiUrl("/api/payment/calculate-expiration"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ epochs: selectedEpochs }),
-      });
+      const expirationResponse = await fetch(
+        apiUrl("/api/payment/calculate-expiration"),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ epochs: selectedEpochs }),
+        },
+      );
 
       let expirationData: ExpirationInfo | null = null;
       if (expirationResponse.ok) {
@@ -261,212 +303,315 @@ export function PaymentApprovalDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-white">
-            <DollarSign className="h-5 w-5 text-emerald-400" />
-            Approve Upload Payment
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader className="space-y-3 pb-2">
+          <DialogTitle className="flex items-center gap-3 heading font-bold text-white">
+             Upload Payment
           </DialogTitle>
-          <DialogDescription className="text-gray-300">
-            Review the cost for uploading this file to Walrus
-          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          {/* File Info */}
-          <div className="rounded-lg border border-emerald-800/50 bg-emerald-950/30 p-4">
-            <h4 className="mb-2 font-semibold text-sm text-white">
-              File Details
-            </h4>
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-300">Name:</span>
-                <span className="font-medium text-white truncate ml-2 max-w-[200px]">
-                  {file.name}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-300">Size:</span>
-                <span className="font-medium text-white">
-                  {formatBytes(file.size)}
-                </span>
-              </div>
+        <div className="space-y-6 pb-6">
+          {/* File Info - Simplified */}
+          <div className="flex items-center gap-4 p-4 rounded-2xl border border-emerald-500/20">
+            <div className="p-3 rounded-xl bg-emerald-500/10">
+              <FileText className="h-5 w-5 text-emerald-400" />
             </div>
-          </div>
-
-          {/* Storage Duration Selector */}
-          <div className="rounded-lg border-2 border-dashed border-emerald-700/50 bg-emerald-950/20 p-4">
-            <div className="mb-3">
-              <p className="font-semibold text-sm text-white">
-                <Clock className="h-4 w-4 inline mr-2 text-emerald-400" />
-                Storage Duration
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-white truncate">{file.name}</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {formatBytes(file.size)}
               </p>
             </div>
-            <div className="flex items-center justify-center gap-3 mb-3">
-              <Slider
-                value={[tempDaysNum || 1]}
-                onValueChange={(value: number[]) => {
-                  setTempDays(String(value[0]));
-                  setSelectedDays(value[0]);
-                }}
-                onValueCommit={(value: number[]) => setSelectedDays(value[0])}
-                min={1}
-                max={maxDays}
-                step={1}
-                className="flex-1"
-              />
-              <input
-                type="number"
-                value={tempDays}
-                onChange={(e) => {
-                  const inputValue = e.target.value;
-                  // Allow empty string for deletion
-                  if (inputValue === '') {
-                    setTempDays('');
-                    return;
-                  }
-                  // Update tempDays with the raw input
-                  setTempDays(inputValue);
-                  // Only update selectedDays if valid
-                  const num = Number(inputValue);
-                  if (num >= 1 && num <= maxDays) {
-                    setSelectedDays(num);
-                  }
-                }}
-                onBlur={() => {
-                  // On blur, if empty or invalid, reset to last valid value
-                  if (tempDays === '' || tempDaysNum < 1 || tempDaysNum > maxDays) {
-                    setTempDays(String(selectedDays));
-                  }
-                }}
-                className={`w-16 h-10 px-2 border rounded bg-emerald-950 text-white text-center rounded-md focus:outline-none ${
-                  isValidDays
-                    ? 'border-emerald-600/50 focus:border-emerald-400'
-                    : 'border-red-600/50 focus:border-red-400'
-                }`}
-                min="1"
-                max={String(maxDays)}
-              />
-              <span className="text-xs text-gray-400 whitespace-nowrap">days</span>
+          </div>
+
+          {/* Storage Duration with Custom Slider */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <p className="font-semibold text-white">Storage Duration</p>
+              </div>
             </div>
-            <div className="flex justify-between text-xs text-gray-300">
-              <span>1 day</span>
-              <span>{maxDays} days</span>
-            </div>
-            <div className="mt-3 space-y-1 text-xs text-emerald-300">
-              {isValidDays ? (
-                <>
-                  <p className="text-center">
-                    {tempDays} {tempDaysNum === 1 ? 'day' : 'days'} = {tempEpochs} {tempEpochs === 1 ? 'epoch' : 'epochs'}
-                    {expiration && (
-                      <span className="text-gray-400"> ({epochDays} {epochDays === 1 ? 'day' : 'days'}/epoch)</span>
-                    )}
-                  </p>
-                </>
-              ) : (
-                <p className="text-center text-red-400">
-                  Please enter a valid duration (1-{maxDays} days)
+
+            {/* Custom Themed Slider */}
+            <div className="space-y-3 px-1">
+              <div className="flex items-center gap-4">
+                <div className="flex-1 relative py-2">
+                  {/* Background track */}
+                  <div className="absolute top-1/2 -translate-y-1/2 h-2 w-full rounded-full bg-slate-800/50" />
+
+                  {/* Progress fill */}
+                  <div
+                    className="absolute top-1/2 -translate-y-1/2 h-2 rounded-full bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 shadow-lg shadow-emerald-500/20 pointer-events-none"
+                    style={{
+                      width: `${((tempDaysNum || 1) / maxDays) * 100}%`,
+                    }}
+                  />
+
+                  {/* Styled range input */}
+                  <input
+                    type="range"
+                    min="1"
+                    max={maxDays}
+                    value={tempDaysNum || 1}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setTempDays(value);
+                      setSelectedDays(Number(value));
+                    }}
+                    className="relative w-full h-2 bg-transparent appearance-none cursor-pointer z-10"
+                    style={{
+                      WebkitAppearance: "none",
+                    }}
+                  />
+
+                  <style>{`
+                    input[type="range"]::-webkit-slider-thumb {
+                      -webkit-appearance: none;
+                      appearance: none;
+                      width: 20px;
+                      height: 20px;
+                      border-radius: 50%;
+                      background: linear-gradient(135deg, #34d399 0%, #14b8a6 100%);
+                      border: 3px solid #0f172a;
+                      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+                      cursor: pointer;
+                      transition: all 0.15s ease;
+                    }
+                    
+                    input[type="range"]::-webkit-slider-thumb:hover {
+                      transform: scale(1.15);
+                      box-shadow: 0 6px 16px rgba(16, 185, 129, 0.5);
+                    }
+                    
+                    input[type="range"]::-webkit-slider-thumb:active {
+                      transform: scale(1.05);
+                    }
+                    
+                    input[type="range"]::-moz-range-thumb {
+                      width: 20px;
+                      height: 20px;
+                      border-radius: 50%;
+                      background: linear-gradient(135deg, #34d399 0%, #14b8a6 100%);
+                      border: 3px solid #0f172a;
+                      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+                      cursor: pointer;
+                      transition: all 0.15s ease;
+                    }
+                    
+                    input[type="range"]::-moz-range-thumb:hover {
+                      transform: scale(1.15);
+                      box-shadow: 0 6px 16px rgba(16, 185, 129, 0.5);
+                    }
+                    
+                    input[type="range"]::-moz-range-thumb:active {
+                      transform: scale(1.05);
+                    }
+                    
+                    input[type="range"]:focus {
+                      outline: none;
+                    }
+                    
+                    /* Hide number input spinner arrows */
+                    input[type="number"]::-webkit-inner-spin-button,
+                    input[type="number"]::-webkit-outer-spin-button {
+                      -webkit-appearance: none;
+                      margin: 0;
+                    }
+                    
+                    input[type="number"] {
+                      -moz-appearance: textfield;
+                    }
+                  `}</style>
+                </div>
+
+                {/* Days input inline with slider */}
+                <div className="flex items-baseline gap-2">
+                  <input
+                    type="number"
+                    value={tempDays}
+                    onChange={(e) => {
+                      const inputValue = e.target.value;
+
+                      // Prevent negative numbers and dash
+                      if (inputValue.includes("-")) {
+                        return;
+                      }
+
+                      if (inputValue === "") {
+                        setTempDays("");
+                        return;
+                      }
+
+                      const num = Number(inputValue);
+                      if (num < 0) {
+                        return;
+                      }
+
+                      setTempDays(inputValue);
+                      if (num >= 1 && num <= maxDays) {
+                        setSelectedDays(num);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (
+                        tempDays === "" ||
+                        tempDaysNum < 1 ||
+                        tempDaysNum > maxDays
+                      ) {
+                        setTempDays(String(selectedDays));
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      // Prevent minus key, 'e', 'E', '+', and '.'
+                      if (["-", "e", "E", "+", "."].includes(e.key)) {
+                        e.preventDefault();
+                      }
+                    }}
+                    className={`w-14 px-2 py-1.5 bg-slate-800/50 border rounded-lg text-center text-lg font-bold text-white focus:outline-none focus:ring-2 transition-all ${
+                      isValidDays
+                        ? "border-emerald-500/30 focus:border-emerald-500 focus:ring-emerald-500/20"
+                        : "border-red-500/50 focus:border-red-500 focus:ring-red-500/20"
+                    }`}
+                    min="1"
+                    max={String(maxDays)}
+                  />
+                  <span className="text-sm text-gray-400 font-medium whitespace-nowrap">
+                    days
+                  </span>
+                </div>
+              </div>
+              
+              {/* Testnet Info */}
+              <div className="text-center mt-3">
+                <p className="text-xs text-gray-500">
+                  Testnet: 1 Epoch = 1 Day
                 </p>
-              )}
-            </div>
-          </div>
-
-          {/* Cost + Balance */}
-          <div className="rounded-lg border-2 border-emerald-800/50 bg-emerald-950/30 p-4">
-            <h4 className="mb-2 font-semibold text-sm text-white">
-              Upload Cost
-            </h4>
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-300">Cost (USD):</span>
-                <span className="text-xl font-bold text-emerald-400">
-                  {loading || !cost ? (
-                    <span className="inline-flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
-                    </span>
-                  ) : (
-                    <>${cost.costUSD.toFixed(2)}</>
-                  )}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-300">Cost (SUI):</span>
-                <span className="font-medium text-white">
-                  {loading || !cost ? (
-                    <span className="inline-flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
-                    </span>
-                  ) : (
-                    <>≈ {cost.costSUI.toFixed(3)} SUI</>
-                  )}
-                </span>
               </div>
             </div>
           </div>
 
-          {/* Balance Info */}
-          <div className="rounded-lg border border-emerald-800/50 bg-emerald-950/30 p-4">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-300">Your Balance:</span>
-              <span className="font-bold text-white">
-                {loading ? (
-                  <span className="inline-flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
-                  </span>
-                ) : (
-                  `$${balance.toFixed(2)}`
-                )}
-              </span>
-            </div>
-            <div className="mt-1 flex justify-between text-sm">
-              <span className="text-gray-300">After Upload:</span>
-              <span className="font-bold text-emerald-400">
-                {loading ? (
-                  <span className="inline-flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
-                  </span>
-                ) : (
-                  `$${Math.max(0, balance - (cost?.costUSD || 0)).toFixed(2)}`
-                )}
-              </span>
+          {/* Cost Breakdown - Modern Card */}
+          <div className="rounded-2xl border border-emerald-500/20 p-5">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400">Upload Cost</span>
+                <div className="text-right min-h-[52px] flex flex-col justify-center">
+                  {loading || !cost ? (
+                    <div className="flex items-center justify-end h-full">
+                      <Loader2 className="h-6 w-6 animate-spin text-emerald-400" />
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-400 leading-tight">
+                        ${cost.costUSD.toFixed(2)}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        ≈ {cost.costSUI.toFixed(3)} SUI
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="h-px bg-gradient-to-r from-transparent via-emerald-500/20 to-transparent -mt-2" />
+
+              <div className="flex items-center justify-between text-sm min-h-[20px]">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">Current Balance</span>
+                </div>
+                <div className="min-w-[60px] text-right">
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-emerald-400 inline-block" />
+                  ) : (
+                    <span className="font-semibold text-white">
+                      ${balance.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-sm min-h-[20px]">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">After Upload</span>
+                  <Wallet className="h-4 w-4 text-gray-500" />
+                </div>
+                <div className="min-w-[60px] text-right">
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-emerald-400 inline-block" />
+                  ) : (
+                    <span className="font-bold text-emerald-400">
+                      ${Math.max(0, balance - (cost?.costUSD || 0)).toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Insufficient Funds Warning */}
-          {/* Removed - insufficient funds are now checked earlier in UploadSection */}
-
-          {/* Other Errors */}
+          {/* Error Display */}
           {!loading && error && (
-            <div className="rounded-lg bg-red-100 p-3 text-red-800 dark:bg-red-900/50 dark:text-red-200">
-              <div className="flex gap-2">
-                <AlertCircle className="h-5 w-5 flex-shrink-0" />
-                <p className="text-sm">{error}</p>
+            <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-4">
+              <div className="flex gap-3">
+                <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-red-300">Error</p>
+                  <p className="text-sm text-red-400 mt-1">{error}</p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Insufficient Funds Warning */}
+          {hasInsufficientFunds && (
+            <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-4">
+              <div className="flex gap-3">
+                <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-red-300">Insufficient Balance</p>
+                  <p className="text-sm text-red-400 mt-1">
+                    You need ${cost.costUSD.toFixed(2)} but only have ${balance.toFixed(2)}.
+                  </p>
+                </div>
               </div>
             </div>
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex gap-3">
           <Button
             variant="outline"
             onClick={handleCancel}
             disabled={loading}
-            className="border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-white"
+            className="flex-1 border-slate-700 bg-slate-800/50 hover:bg-slate-700/50 text-white h-11"
           >
             Cancel
           </Button>
-          <Button
-            onClick={handleApprove}
-            disabled={loading || !cost || !isValidDays}
-            className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700"
-          >
-            <span className="relative inline-flex items-center justify-center">
-              <span className="invisible">Approve & Upload</span>
-              <span className="absolute inset-0 flex items-center justify-center">
-                {loading ? "Processing..." : "Approve & Upload"}
-              </span>
-            </span>
-          </Button>
+          {hasInsufficientFunds ? (
+            <Button
+              onClick={() => {
+                onCancel();
+                navigate("/payment");
+              }}
+              className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold shadow-lg shadow-red-500/25 h-11 transition-all"
+            >
+              Add Funds
+            </Button>
+          ) : (
+            <Button
+              onClick={handleApprove}
+              disabled={loading || !cost || !isValidDays}
+              className="flex-1 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 text-white font-semibold shadow-lg shadow-emerald-500/25 h-11 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Processing...
+                </span>
+              ) : (
+                "Approve & Upload"
+              )}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

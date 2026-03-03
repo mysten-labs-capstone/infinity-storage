@@ -369,6 +369,28 @@ export async function POST(req: Request) {
       if (s3UploadFailed) {
         // Continue to sync mode below
       } else {
+        // Deduct payment immediately so balance updates before returning to client
+        // This prevents race condition where client clears cache before payment is processed
+        try {
+          await deductPayment(userId, costUSD, `Upload: ${file.name}`);
+          paymentDeducted = true;
+        } catch (paymentErr: any) {
+          console.error("[upload] Payment failed:", paymentErr);
+          // Clean up S3 upload
+          try {
+            await s3Service.delete(s3Key);
+          } catch (cleanupErr) {
+            console.warn(
+              "[upload] Failed to cleanup S3 after payment failure:",
+              cleanupErr,
+            );
+          }
+          return NextResponse.json(
+            { error: "Payment failed" },
+            { status: 400, headers: withCORS(req) },
+          );
+        }
+
         // Save metadata with pending status
         await cacheService.init();
         const encryptedUserId = await cacheService["encryptUserId"](userId);
@@ -397,7 +419,7 @@ export async function POST(req: Request) {
               s3Key: s3Key,
               status: "pending", // Will be picked up by cron job every minute
               folderId: folderId || undefined,
-              agreedCostUSD: costUSD, // So process-async deducts the same amount user was quoted
+              agreedCostUSD: -1, // Negative value indicates payment already deducted in upload route
             },
           });
         } catch (dbErr: any) {

@@ -126,7 +126,6 @@ export default function FolderTree({
   const user = authService.getCurrentUser();
   const userId = user?.id ?? null;
 
-
   // Fetch balance
   useEffect(() => {
     const fetchBalance = async (force = false) => {
@@ -143,11 +142,14 @@ export default function FolderTree({
       // Initial fetch
       fetchBalance();
 
-      // Listen for balance update events (triggered after uploads/payments)
+      // Listen for balance update events (triggered after uploads/payments/extends)
       const balanceUpdateHandler = () => {
+        console.log(
+          "[SideBar] Received transactions:updated event, fetching balance with force=true",
+        );
         fetchBalance(true);
       };
-      window.addEventListener("balance-updated", balanceUpdateHandler);
+      window.addEventListener("transactions:updated", balanceUpdateHandler);
 
       const visibilityHandler = () => {
         if (!document.hidden) fetchBalance(true);
@@ -161,7 +163,10 @@ export default function FolderTree({
 
       return () => {
         clearInterval(interval);
-        window.removeEventListener("balance-updated", balanceUpdateHandler);
+        window.removeEventListener(
+          "transactions:updated",
+          balanceUpdateHandler,
+        );
         document.removeEventListener("visibilitychange", visibilityHandler);
       };
     }
@@ -236,7 +241,10 @@ export default function FolderTree({
   };
 
   const handleFoldersLabelDragLeave = (e: React.DragEvent) => {
-    if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) {
+    if (
+      e.currentTarget === e.target ||
+      !e.currentTarget.contains(e.relatedTarget as Node)
+    ) {
       setDragOverFoldersLabel(false);
     }
   };
@@ -500,7 +508,10 @@ export default function FolderTree({
   useEffect(() => {
     if (!showNewMenu) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node)) {
+      if (
+        newMenuRef.current &&
+        !newMenuRef.current.contains(e.target as Node)
+      ) {
         setShowNewMenu(false);
       }
     };
@@ -577,7 +588,9 @@ export default function FolderTree({
             >
               <Upload className="h-4 w-4" />
               Upload
-              <ChevronDown className={`h-3.5 w-3.5 ml-auto transition-transform ${showNewMenu ? "rotate-180" : ""}`} />
+              <ChevronDown
+                className={`h-3.5 w-3.5 ml-auto transition-transform ${showNewMenu ? "rotate-180" : ""}`}
+              />
             </Button>
             {showNewMenu && (
               <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-900 rounded-lg shadow-xl border border-zinc-800 py-1.5 z-50">
@@ -605,7 +618,9 @@ export default function FolderTree({
                       if (path === "/" || path.startsWith("/home")) {
                         onFolderUploadClick();
                       } else {
-                        navigate("/home", { state: { openFolderUploadPicker: true } });
+                        navigate("/home", {
+                          state: { openFolderUploadPicker: true },
+                        });
                       }
                     }
                   }}
@@ -756,7 +771,11 @@ export default function FolderTree({
                         setFoldersSectionExpanded((prev) => !prev);
                       }}
                       className="p-0.5 hover:bg-zinc-800 rounded text-gray-400 hover:text-gray-300 transition-colors"
-                      title={foldersSectionExpanded ? "Collapse folders" : "Expand folders"}
+                      title={
+                        foldersSectionExpanded
+                          ? "Collapse folders"
+                          : "Expand folders"
+                      }
                     >
                       {foldersSectionExpanded ? (
                         <ChevronDown className="h-4 w-4" />
@@ -772,7 +791,9 @@ export default function FolderTree({
                         onSelectView?.("all");
                       }}
                       className={`flex flex-1 items-center gap-2 pl-1.5 py-1 rounded-md cursor-pointer transition-colors text-gray-300 ${
-                        dragOverFoldersLabel ? "bg-teal-600/20 border border-teal-500/50" : "hover:bg-zinc-800"
+                        dragOverFoldersLabel
+                          ? "bg-teal-600/20 border border-teal-500/50"
+                          : "hover:bg-zinc-800"
                       }`}
                       onDragOver={handleFoldersLabelDragOver}
                       onDragLeave={handleFoldersLabelDragLeave}
@@ -943,7 +964,9 @@ export default function FolderTree({
                   ) : (
                     <Download className="h-3 w-3" />
                   )}
-                  {downloadingFolderId === contextMenu.folderId ? "Downloading..." : "Download"}
+                  {downloadingFolderId === contextMenu.folderId
+                    ? "Downloading..."
+                    : "Download"}
                 </button>
               )}
               <button
@@ -988,7 +1011,6 @@ export default function FolderTree({
           </>,
           document.body,
         )}
-
     </div>
   );
 }

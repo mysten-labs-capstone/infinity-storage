@@ -48,7 +48,6 @@ export default function App() {
   const [searchParams] = useSearchParams();
   const uploadDialogFromPaymentRef = useRef(false);
   const folderRefreshTimeoutRef = useRef<number | null>(null);
-  const recentlyDeletedFolderIdsRef = useRef<Set<string>>(new Set());
   const [uploadedFiles, setUploadedFiles] = useState<CachedFile[]>([]);
   const [epochs, setEpochs] = useState(3); // Default: 3 epochs = 90 days
   const daysPerEpoch = useDaysPerEpoch();
@@ -87,6 +86,7 @@ export default function App() {
   const [folderRefreshKey, setFolderRefreshKey] = useState(0);
   const [sharedFiles, setSharedFiles] = useState<any[]>([]);
   const [folders, setFolders] = useState<any[]>([]);
+  const [hasInitialDataLoaded, setHasInitialDataLoaded] = useState(false);
   const [showInsufficientFundsDialog, setShowInsufficientFundsDialog] =
     useState(false);
   const [insufficientFundsInfo, setInsufficientFundsInfo] = useState<{
@@ -103,8 +103,7 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [showMiniNewMenu, setShowMiniNewMenu] = useState(false);
   const miniNewMenuRef = useRef<HTMLDivElement | null>(null);
-  const [downloadingFolderId, setDownloadingFolderId] = useState<string | null>(null);
-  const pendingUndoFolderRef = useRef<{ folder: any; folderId: string } | null>(
+  const [downloadingFolderId, setDownloadingFolderId] = useState<string | null>(
     null,
   );
 
@@ -130,16 +129,26 @@ export default function App() {
     let active = false;
 
     const show = () => {
-      if (!active) { active = true; setIsDraggingExternal(true); }
+      if (!active) {
+        active = true;
+        setIsDraggingExternal(true);
+      }
     };
     const hide = () => {
-      if (active) { active = false; setIsDraggingExternal(false); }
+      if (active) {
+        active = false;
+        setIsDraggingExternal(false);
+      }
     };
 
     const isExternalFileDrag = (e: DragEvent) => {
       const types = e.dataTransfer?.types;
       if (!types) return false;
-      if (types.includes("application/x-walrus-file") || types.includes("application/x-walrus-folder")) return false;
+      if (
+        types.includes("application/x-walrus-file") ||
+        types.includes("application/x-walrus-folder")
+      )
+        return false;
       return types.includes("Files");
     };
 
@@ -266,7 +275,10 @@ export default function App() {
   useEffect(() => {
     if (!showMiniNewMenu) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (miniNewMenuRef.current && !miniNewMenuRef.current.contains(e.target as Node)) {
+      if (
+        miniNewMenuRef.current &&
+        !miniNewMenuRef.current.contains(e.target as Node)
+      ) {
         setShowMiniNewMenu(false);
       }
     };
@@ -281,9 +293,10 @@ export default function App() {
       !uploadDialogFromPaymentRef.current
     ) {
       uploadDialogFromPaymentRef.current = true;
-      const event = location.state?.uploadType === "folder"
-        ? "open-folder-upload-picker"
-        : "open-upload-picker";
+      const event =
+        location.state?.uploadType === "folder"
+          ? "open-folder-upload-picker"
+          : "open-upload-picker";
       window.dispatchEvent(new Event(event));
     }
   }, [location.state?.openUploadDialog]);
@@ -332,20 +345,7 @@ export default function App() {
       const res = await fetch(apiUrl(`/api/folders/tree?userId=${user.id}`));
       if (res.ok) {
         const data = await res.json();
-        let tree = buildFolderTree(data.folders ?? []);
-        const deletedIds = recentlyDeletedFolderIdsRef.current;
-        if (deletedIds.size > 0) {
-          const filterDeleted = (nodes: any[]): any[] =>
-            nodes
-              .filter((n) => !deletedIds.has(n.id))
-              .map((n) => ({
-                ...n,
-                children: filterDeleted(n.children),
-                childCount: 0,
-              }))
-              .map((n) => ({ ...n, childCount: n.children.length }));
-          tree = filterDeleted(tree);
-        }
+        const tree = buildFolderTree(data.folders ?? []);
         setFolders(tree);
       }
     } catch (err) {
@@ -442,10 +442,10 @@ export default function App() {
   // Load files from server on mount and when user changes
   useEffect(() => {
     let mounted = true;
-    const reloadAll = () => {
-      loadFiles();
-      loadSharedFiles();
-      loadFolders();
+    setHasInitialDataLoaded(false);
+    const reloadAll = async () => {
+      await Promise.all([loadFiles(), loadSharedFiles(), loadFolders()]);
+      if (mounted) setHasInitialDataLoaded(true);
     };
 
     reloadAll();
@@ -543,9 +543,10 @@ export default function App() {
     }
     // If returning from payment page with openUploadAfterPayment flag
     if (state.openUploadAfterPayment) {
-      const event = state.openUploadAfterPayment === "folder"
-        ? "open-folder-upload-picker"
-        : "open-upload-picker";
+      const event =
+        state.openUploadAfterPayment === "folder"
+          ? "open-folder-upload-picker"
+          : "open-upload-picker";
       window.dispatchEvent(new Event(event));
       navigate(location.pathname + window.location.search, {
         replace: true,
@@ -559,9 +560,10 @@ export default function App() {
       "openUploadAfterPayment",
     );
     if (openUploadAfterPayment) {
-      const event = openUploadAfterPayment === "folder"
-        ? "open-folder-upload-picker"
-        : "open-upload-picker";
+      const event =
+        openUploadAfterPayment === "folder"
+          ? "open-folder-upload-picker"
+          : "open-upload-picker";
       window.dispatchEvent(new Event(event));
       sessionStorage.removeItem("openUploadAfterPayment");
       return;
@@ -620,7 +622,8 @@ export default function App() {
       setFolderRefreshKey((prev) => prev + 1);
     };
     window.addEventListener("folder-created-from-drop", handler);
-    return () => window.removeEventListener("folder-created-from-drop", handler);
+    return () =>
+      window.removeEventListener("folder-created-from-drop", handler);
   }, []);
 
   // Convert CachedFile to FileItem format for FolderCardView
@@ -737,7 +740,9 @@ export default function App() {
       setFolders((prev) => {
         // If it's a root folder, add directly
         if (newFolder.parentId === null) {
-          const updated = [...prev, folderNode];
+          return [...prev, folderNode].sort((a, b) =>
+            (a.name ?? "").localeCompare(b.name ?? ""),
+          );
         }
 
         // Otherwise, find parent and add to its children
@@ -746,8 +751,10 @@ export default function App() {
             if (folder.id === newFolder.parentId) {
               return {
                 ...folder,
-                children: [...folder.children, folderNode],
-                childCount: folder.childCount + 1,
+                children: [...folder.children, folderNode].sort((a, b) =>
+                  (a.name ?? "").localeCompare(b.name ?? ""),
+                ),
+                childCount: (folder.childCount ?? folder.children.length) + 1,
               };
             }
             if (folder.children.length > 0) {
@@ -765,11 +772,9 @@ export default function App() {
       });
     }
 
-    // Delay refresh from server to allow optimistic update to render
-    setTimeout(() => {
-      loadFiles();
-      loadFolders();
-    }, 300);
+    // Sync with server in background (without delaying optimistic UI)
+    void loadFiles();
+    void loadFolders();
   };
 
   const checkMinimumBalanceOrShowDialog = async (context?: {
@@ -1132,70 +1137,23 @@ export default function App() {
     showToast({ message: "Folder moved" });
   };
 
-  /** Find a folder by id in the tree; returns a deep copy or null */
-  const findFolderInTree = useCallback((tree: any[], folderId: string): any => {
-    for (const node of tree) {
-      if (node.id === folderId) {
-        return {
-          ...node,
-          children: (node.children || []).map((c: any) =>
-            findFolderInTree(node.children || [], c.id) ?? c,
-          ),
-          childCount: (node.children || []).length,
-        };
-      }
-      const found = findFolderInTree(node.children || [], folderId);
-      if (found) return found;
-    }
-    return null;
-  }, []);
-
-  /** Insert a folder back into the tree (for undo) */
-  const insertFolderIntoTree = useCallback(
-    (tree: any[], folder: any): any[] => {
-      if (folder.parentId == null) {
-        return [...tree, folder];
-      }
-      return tree.map((node) => {
-        if (node.id === folder.parentId) {
-          return {
-            ...node,
-            children: [...(node.children || []), folder],
-            childCount: (node.children || []).length + 1,
-          };
-        }
-        const newChildren = insertFolderIntoTree(node.children || [], folder);
-        return {
-          ...node,
-          children: newChildren,
-          childCount: newChildren.length,
-        };
-      });
-    },
-    [],
-  );
-
   const handleFolderDeletedOptimistic = (folderId: string) => {
-    recentlyDeletedFolderIdsRef.current.add(folderId);
-    window.setTimeout(() => {
-      recentlyDeletedFolderIdsRef.current.delete(folderId);
-    }, 8000);
-
-    // Optimistically remove folder from UI immediately
     setFolders((prev) => {
       const removeFolder = (folderList: any[]): any[] => {
         return folderList
           .filter((folder) => folder.id !== folderId)
-          .map((folder) => ({
-            ...folder,
-            children: removeFolder(folder.children),
-            childCount: removeFolder(folder.children).length,
-          }));
+          .map((folder) => {
+            const children = removeFolder(folder.children || []);
+            return {
+              ...folder,
+              children,
+              childCount: children.length,
+            };
+          });
       };
       return removeFolder(prev);
     });
 
-    // If the deleted folder was selected, deselect it
     if (selectedFolderId === folderId) {
       setSelectedFolderId(null);
     }
@@ -1203,83 +1161,57 @@ export default function App() {
 
   const handleFolderDeleted = () => {
     setFolderRefreshKey((prev) => prev + 1);
-    loadFiles(); // Refresh files (moved to root); do not refetch folders to avoid stale response bringing the folder back
+    loadFiles();
   };
 
-  const doActualFolderDelete = useCallback(
-    async (folderId: string) => {
-      const u = authService.getCurrentUser();
-      if (!u?.id) return;
-      try {
-        const res = await fetch(
-          apiUrl(`/api/folders/${folderId}?userId=${u.id}`),
-          { method: "DELETE" },
-        );
-        if (res.ok) {
-          handleFolderDeleted();
-        } else {
-          const data = await res.json();
-          alert(data.error || "Failed to delete folder");
-          await loadFolders();
-        }
-      } catch (err) {
-        console.error("Failed to delete folder:", err);
+  const doActualFolderDelete = useCallback(async (folderId: string) => {
+    const u = authService.getCurrentUser();
+    if (!u?.id) return false;
+    try {
+      const res = await fetch(
+        apiUrl(`/api/folders/${folderId}?userId=${u.id}`),
+        { method: "DELETE" },
+      );
+      if (res.ok) {
+        handleFolderDeletedOptimistic(folderId);
+        handleFolderDeleted();
         await loadFolders();
+        return true;
       }
-    },
-    [],
-  );
+
+      const data = await res.json();
+      alert(data.error || "Failed to delete folder");
+      await loadFolders();
+      return false;
+    } catch (err) {
+      console.error("Failed to delete folder:", err);
+      await loadFolders();
+      return false;
+    }
+  }, []);
 
   const handleRequestFolderDelete = useCallback(
-    (folderId: string, folderName: string) => {
-      const folderNode = findFolderInTree(folders, folderId);
-      if (folderNode) {
-        pendingUndoFolderRef.current = { folder: folderNode, folderId };
+    async (folderId: string, folderName: string) => {
+      const deleted = await doActualFolderDelete(folderId);
+      if (deleted) {
+        showToast({ message: `Folder "${folderName}" deleted` });
       }
-      handleFolderDeletedOptimistic(folderId);
-      showToast({
-        message: `Folder "${folderName}" deleted`,
-        undoLabel: "Undo",
-        onUndo: () => {
-          const pending = pendingUndoFolderRef.current;
-          pendingUndoFolderRef.current = null;
-          recentlyDeletedFolderIdsRef.current.delete(folderId);
-          if (pending?.folder) {
-            setFolders((prev) =>
-              insertFolderIntoTree(prev, pending.folder),
-            );
-          }
-        },
-        onExpire: () => {
-          pendingUndoFolderRef.current = null;
-          doActualFolderDelete(folderId);
-        },
-      });
     },
-    [
-      showToast,
-      doActualFolderDelete,
-      folders,
-      findFolderInTree,
-      insertFolderIntoTree,
-    ],
+    [showToast, doActualFolderDelete],
   );
 
   const handleSharedFilesRefresh = () => {
     loadSharedFiles(); // Refresh shared files list
   };
 
-  const findFolderByIdInTree = useCallback(
-    (tree: any[], id: string): any => {
-      for (const node of tree) {
-        if (node.id === id) return node;
-        const found = findFolderByIdInTree(node.children || [], id);
-        if (found) return found;
-      }
-      return null;
-    },
-    [],
-  );
+  const findFolderByIdInTree = useCallback((tree: any[], id: string): any => {
+    for (const node of tree) {
+      if (node.id === id) return node;
+      const found = findFolderByIdInTree(node.children || [], id);
+      if (found) return found;
+    }
+    return null;
+  }, []);
 
   const handleDownloadFolder = useCallback(
     async (folderId: string) => {
@@ -1364,7 +1296,14 @@ export default function App() {
         setDownloadingFolderId(null);
       }
     },
-    [privateKey, folders, uploadedFiles, showToast, user?.id, findFolderByIdInTree],
+    [
+      privateKey,
+      folders,
+      uploadedFiles,
+      showToast,
+      user?.id,
+      findFolderByIdInTree,
+    ],
   );
 
   return (
@@ -1640,6 +1579,7 @@ export default function App() {
           <FolderCardView
             files={fileItems}
             folders={folders}
+            dataReady={hasInitialDataLoaded}
             currentFolderId={selectedFolderId}
             onFolderChange={setSelectedFolderId}
             onFileDeleted={handleFileDeleted}
@@ -1719,7 +1659,9 @@ export default function App() {
             } else {
               sessionStorage.setItem(
                 "openUploadAfterPayment",
-                insufficientFundsContext?.uploadType === "folder" ? "folder" : "file",
+                insufficientFundsContext?.uploadType === "folder"
+                  ? "folder"
+                  : "file",
               );
             }
             navigate("/payment");

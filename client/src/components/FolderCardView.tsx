@@ -97,6 +97,7 @@ export type FileItem = {
 interface FolderCardViewProps {
   files: FileItem[];
   folders: FolderNode[];
+  dataReady?: boolean;
   currentFolderId: string | null;
   onFolderChange: (folderId: string | null) => void;
   onFileDeleted?: (blobId?: string) => void;
@@ -162,6 +163,7 @@ function truncateFileName(name: string, maxLength: number = 70): string {
 export default function FolderCardView({
   files,
   folders: propFolders,
+  dataReady = true,
   currentFolderId,
   onFolderChange,
   onFileDeleted,
@@ -204,7 +206,9 @@ export default function FolderCardView({
 
   // File action states
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [downloadingFolderId, setDownloadingFolderId] = useState<string | null>(null);
+  const [downloadingFolderId, setDownloadingFolderId] = useState<string | null>(
+    null,
+  );
   const [savingSharedId, setSavingSharedId] = useState<string | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [fileForPayment, setFileForPayment] = useState<File | null>(null);
@@ -307,6 +311,11 @@ export default function FolderCardView({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [fileToDelete, setFileToDelete] = useState<{
     blobId: string;
+    name: string;
+  } | null>(null);
+  const [folderDeleteDialogOpen, setFolderDeleteDialogOpen] = useState(false);
+  const [folderToDelete, setFolderToDelete] = useState<{
+    id: string;
     name: string;
   } | null>(null);
   const [locallyDeletedBlobIds, setLocallyDeletedBlobIds] = useState<
@@ -842,51 +851,48 @@ export default function FolderCardView({
   );
 
   // Get folders at current level (only show in 'all' view)
-  const currentLevelFolders = useMemo(
-    () => {
-      let base: FolderNode[] =
-        currentView === "all"
-          ? currentFolderId === null
-            ? folders
-                .filter((f) => f.parentId === null)
-                .filter((f) => !locallyMovedFolderIds.has(f.id))
-            : (() => {
-                const targetFolder = findFolderById(folders, currentFolderId);
-                if (!targetFolder) {
-                  console.warn(
-                    "[FolderCardView] Could not find folder with ID:",
-                    currentFolderId,
-                    "in folders:",
-                    folders,
-                  );
-                }
-                return targetFolder
-                  ? targetFolder.children.filter(
-                      (f) => !locallyMovedFolderIds.has(f.id),
-                    )
-                  : [];
-              })()
-          : [];
+  const currentLevelFolders = useMemo(() => {
+    let base: FolderNode[] =
+      currentView === "all"
+        ? currentFolderId === null
+          ? folders
+              .filter((f) => f.parentId === null)
+              .filter((f) => !locallyMovedFolderIds.has(f.id))
+          : (() => {
+              const targetFolder = findFolderById(folders, currentFolderId);
+              if (!targetFolder) {
+                console.warn(
+                  "[FolderCardView] Could not find folder with ID:",
+                  currentFolderId,
+                  "in folders:",
+                  folders,
+                );
+              }
+              return targetFolder
+                ? targetFolder.children.filter(
+                    (f) => !locallyMovedFolderIds.has(f.id),
+                  )
+                : [];
+            })()
+        : [];
 
-      if (sortBy === "name") {
-        base = [...base].sort((a, b) => {
-          const cmp = a.name.localeCompare(b.name);
-          return sortDirection === "asc" ? cmp : -cmp;
-        });
-      }
+    if (sortBy === "name") {
+      base = [...base].sort((a, b) => {
+        const cmp = a.name.localeCompare(b.name);
+        return sortDirection === "asc" ? cmp : -cmp;
+      });
+    }
 
-      return base;
-    },
-    [
-      currentView,
-      currentFolderId,
-      folders,
-      locallyMovedFolderIds,
-      sortBy,
-      sortDirection,
-      findFolderById,
-    ],
-  );
+    return base;
+  }, [
+    currentView,
+    currentFolderId,
+    folders,
+    locallyMovedFolderIds,
+    sortBy,
+    sortDirection,
+    findFolderById,
+  ]);
 
   const combinedSharedFiles =
     currentView === "shared"
@@ -1242,8 +1248,7 @@ export default function FolderCardView({
           break;
         case "uploadedAt":
           cmp =
-            new Date(a.uploadedAt).getTime() -
-            new Date(b.uploadedAt).getTime();
+            new Date(a.uploadedAt).getTime() - new Date(b.uploadedAt).getTime();
           break;
       }
       return sortDirection === "asc" ? cmp : -cmp;
@@ -2673,10 +2678,7 @@ export default function FolderCardView({
           return;
         }
 
-        const buildFolderPath = (
-          fId: string,
-          rootId: string,
-        ): string => {
+        const buildFolderPath = (fId: string, rootId: string): string => {
           const parts: string[] = [];
           let current = findFolderById(folders, fId);
           while (current && current.id !== rootId) {
@@ -2716,9 +2718,7 @@ export default function FolderCardView({
             const subPath = file.folderId
               ? buildFolderPath(file.folderId, folderId)
               : "";
-            const filePath = subPath
-              ? `${subPath}/${file.name}`
-              : file.name;
+            const filePath = subPath ? `${subPath}/${file.name}` : file.name;
 
             zip.file(filePath, fileBlob);
           } catch (err) {
@@ -3833,8 +3833,13 @@ export default function FolderCardView({
       )}
 
       {/* Sort Toolbar */}
-      {(currentLevelFiles.length > 0 || currentLevelFolders.length > 0 || currentFolderId !== null) && (
-        <div className="flex items-center gap-2" onMouseDown={(e) => e.stopPropagation()}>
+      {(currentLevelFiles.length > 0 ||
+        currentLevelFolders.length > 0 ||
+        currentFolderId !== null) && (
+        <div
+          className="flex items-center gap-2"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
           {(
             [
               { key: "name" as SortField, label: "Name" },
@@ -3983,8 +3988,11 @@ export default function FolderCardView({
       )}
 
       {/* Multi-select action bar — fixed bottom center */}
-      {hasSelection && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-4 py-2.5 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-xl shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+      {dataReady && hasSelection && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-4 py-2.5 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-xl shadow-2xl"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
           <span className="text-xs text-gray-300 font-medium whitespace-nowrap">
             {selectedFileIds.size + selectedFolderIds.size} selected
           </span>
@@ -4023,31 +4031,37 @@ export default function FolderCardView({
       )}
 
       {/* Empty State - Show when no folders exist at root (only in 'all' view) */}
-      {currentView === "all" &&
+      {dataReady &&
+        currentView === "all" &&
         currentFolderId === null &&
         currentLevelFolders.length === 0 &&
         currentLevelFiles.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16">
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 w-full max-w-6xl">
-              {/* Dotted line create folder button */}
+              {/* Professional service-style create folder button */}
               <button
                 onClick={() => {
                   setCreateFolderParentId(null);
                   setCreateFolderDialogOpen(true);
                 }}
-                className="create-folder-btn group relative rounded-xl border-2 border-dashed border-emerald-700 bg-emerald-950/20 p-8 shadow-sm flex flex-col items-center justify-center min-h-[160px]"
+                className="group relative rounded-xl border-2 border-emerald-800/50 bg-emerald-950/30 p-4 shadow-sm transition-all duration-200 hover:border-emerald-700/60 hover:bg-emerald-900/20"
               >
-                <FolderPlus className="folder-plus-icon h-12 w-12 text-emerald-400 mb-3" />
-                <span className="text-sm font-medium text-emerald-300">
-                  Create New Folder
-                </span>
+                <div className="flex flex-col items-center text-center">
+                  <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
+                    <FolderPlus className="h-10 w-10 text-emerald-400" />
+                  </div>
+                  <p className="font-medium text-gray-100 truncate w-full text-[15px]">
+                    Create New Folder
+                  </p>
+                </div>
               </button>
             </div>
           </div>
         )}
 
       {/* Show create folder prompt when files exist but no folders */}
-      {currentView === "all" &&
+      {dataReady &&
+        currentView === "all" &&
         currentFolderId === null &&
         currentLevelFolders.length === 0 &&
         currentLevelFiles.length > 0 && (
@@ -4059,19 +4073,23 @@ export default function FolderCardView({
                   setCreateFolderParentId(null);
                   setCreateFolderDialogOpen(true);
                 }}
-                className="create-folder-btn group relative rounded-xl border-2 border-dashed border-emerald-700 bg-emerald-950/20 p-8 shadow-sm flex flex-col items-center justify-center min-h-[160px]"
+                className="group relative rounded-xl border-2 border-emerald-800/50 bg-emerald-950/30 p-4 shadow-sm transition-all duration-200 hover:border-emerald-700/60 hover:bg-emerald-900/20"
               >
-                <FolderPlus className="folder-plus-icon h-12 w-12 text-emerald-400 mb-3" />
-                <span className="text-sm font-medium text-emerald-300">
-                  Create New Folder
-                </span>
+                <div className="flex flex-col items-center text-center">
+                  <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
+                    <FolderPlus className="h-10 w-10 text-emerald-400" />
+                  </div>
+                  <p className="font-medium text-gray-100 truncate w-full text-[15px]">
+                    Create New Folder
+                  </p>
+                </div>
               </button>
             </div>
           </div>
         )}
 
       {/* Folders Grid - Show ONLY in 'all' view when at root or in a folder with subfolders */}
-      {currentView === "all" && currentLevelFolders.length > 0 && (
+      {dataReady && currentView === "all" && currentLevelFolders.length > 0 && (
         <div
           onContextMenu={(e) => {
             e.preventDefault();
@@ -4153,7 +4171,8 @@ export default function FolderCardView({
                           value={editingFolderName}
                           onChange={(e) => setEditingFolderName(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter") handleRenameFolder(folder.id);
+                            if (e.key === "Enter")
+                              handleRenameFolder(folder.id);
                             if (e.key === "Escape") {
                               setEditingFolderId(null);
                               setEditingFolderName("");
@@ -4250,7 +4269,10 @@ export default function FolderCardView({
                         >
                           <button
                             className="w-full flex items-center gap-2 px-2 py-2 text-sm hover:bg-zinc-800 text-white text-left disabled:opacity-50"
-                            disabled={(downloadingFolderIdProp ?? downloadingFolderId) === folder.id}
+                            disabled={
+                              (downloadingFolderIdProp ??
+                                downloadingFolderId) === folder.id
+                            }
                             onClick={() => {
                               if (onDownloadFolder) {
                                 onDownloadFolder(folder.id);
@@ -4261,12 +4283,16 @@ export default function FolderCardView({
                               setFolderMenuPosition(null);
                             }}
                           >
-                            {(downloadingFolderIdProp ?? downloadingFolderId) === folder.id ? (
+                            {(downloadingFolderIdProp ??
+                              downloadingFolderId) === folder.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <Download className="h-4 w-4" />
                             )}
-                            {(downloadingFolderIdProp ?? downloadingFolderId) === folder.id ? "Downloading..." : "Download"}
+                            {(downloadingFolderIdProp ??
+                              downloadingFolderId) === folder.id
+                              ? "Downloading..."
+                              : "Download"}
                           </button>
                           <button
                             className="w-full flex items-center gap-2 px-2 py-2 text-sm hover:bg-zinc-800 text-white text-left"
@@ -4284,7 +4310,11 @@ export default function FolderCardView({
                           <button
                             className="w-full flex items-center gap-2 px-2 py-2 text-sm hover:bg-destructive-20 text-destructive text-left"
                             onClick={() => {
-                              onRequestFolderDelete?.(folder.id, folder.name);
+                              setFolderToDelete({
+                                id: folder.id,
+                                name: folder.name,
+                              });
+                              setFolderDeleteDialogOpen(true);
                               setOpenFolderMenuId(null);
                               setFolderMenuPosition(null);
                             }}
@@ -4304,7 +4334,8 @@ export default function FolderCardView({
       )}
 
       {/* Empty State for folder with no files (only in 'all' view) */}
-      {currentView === "all" &&
+      {dataReady &&
+        currentView === "all" &&
         currentFolderId !== null &&
         currentLevelFiles.length === 0 &&
         currentLevelFolders.length === 0 && (
@@ -4321,7 +4352,7 @@ export default function FolderCardView({
           </div>
         )}
       {/* Empty State for special views */}
-      {currentView !== "all" && currentLevelFiles.length === 0 && (
+      {dataReady && currentView !== "all" && currentLevelFiles.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="empty-state-icon relative mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
             {currentView === "recents" && (
@@ -4356,7 +4387,7 @@ export default function FolderCardView({
       )}
 
       {/* Files Display - Vertical list for consistency across all views */}
-      {currentLevelFiles.length > 0 && (
+      {dataReady && currentLevelFiles.length > 0 && (
         <div className="w-full">
           {currentView === "all" && (
             <h3 className="text-sm font-medium text-gray-300 mb-3">Files</h3>
@@ -4471,6 +4502,28 @@ export default function FolderCardView({
           }}
           fileName={fileToDelete.name}
           onConfirm={confirmDelete}
+        />
+      )}
+
+      {folderToDelete && (
+        <DeleteConfirmDialog
+          open={folderDeleteDialogOpen}
+          onOpenChange={(open) => {
+            setFolderDeleteDialogOpen(open);
+            if (!open) {
+              setFolderToDelete(null);
+            }
+          }}
+          fileName={folderToDelete.name}
+          title="Are you sure you want to permanently delete this folder?"
+          description=""
+          note="Files inside this folder will be moved to root."
+          confirmLabel="Delete Permanently"
+          onConfirm={() => {
+            onRequestFolderDelete?.(folderToDelete.id, folderToDelete.name);
+            setFolderDeleteDialogOpen(false);
+            setFolderToDelete(null);
+          }}
         />
       )}
 

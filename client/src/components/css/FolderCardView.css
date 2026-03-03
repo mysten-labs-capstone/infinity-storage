@@ -407,40 +407,6 @@
   animation: cryptoPulse 3s ease-in-out infinite;
 }
 
-/* Create Folder Button */
-.create-folder-btn {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  overflow: hidden;
-}
-
-.create-folder-btn::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    circle at center,
-    rgba(16, 185, 129, 0.1) 0%,
-    transparent 70%
-  );
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.create-folder-btn:hover::before {
-  opacity: 1;
-}
-
-.create-folder-btn:hover {
-  transform: scale(1.02);
-  border-color: rgba(16, 185, 129, 0.6);
-  box-shadow: 0 0 30px -10px rgba(16, 185, 129, 0.4);
-}
-
-.create-folder-btn:hover .folder-plus-icon {
-  animation: iconPop 0.4s ease;
-}
-
 /* Star Animation */
 .star-btn {
   transition: all 0.3s ease;

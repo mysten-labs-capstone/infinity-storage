@@ -255,10 +255,12 @@ export default function UploadToast() {
                     f.status === "uploading" &&
                     Math.round(f.progress || 0) >= 100,
                 ).length;
-                const totalSize = folderItems.reduce(
-                  (s, f) => s + f.size,
-                  0,
-                );
+                const totalSize = folderItems.reduce((s, f) => s + f.size, 0);
+                // Get the original total count from any file in the folder
+                const originalTotal =
+                  folderItems[0]?.folderUploadTotalCount || folderItems.length;
+                const completedCount =
+                  originalTotal - folderItems.length + doneCount;
 
                 return (
                   <div
@@ -278,11 +280,11 @@ export default function UploadToast() {
                           {name}
                         </p>
                         <p className="text-xs text-zinc-400">
-                          {folderItems.length} file
-                          {folderItems.length > 1 ? "s" : ""} &middot;{" "}
+                          {originalTotal} file
+                          {originalTotal > 1 ? "s" : ""} &middot;{" "}
                           {formatBytes(totalSize)}
-                          {doneCount > 0 &&
-                            ` · ${doneCount}/${folderItems.length} done`}
+                          {completedCount > 0 &&
+                            ` · ${completedCount}/${originalTotal} done`}
                         </p>
                       </div>
                     </button>

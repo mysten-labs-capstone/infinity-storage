@@ -391,6 +391,9 @@ export default function UploadSection({
 
       setPaymentError(null);
       const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
+      const folderTotalCount = targetFolderUploadName
+        ? selectedFiles.length
+        : undefined;
       for (const file of selectedFiles) {
         const share = totalSize > 0 ? file.size / totalSize : 0;
         const perFileCost = costUSD * share;
@@ -401,6 +404,7 @@ export default function UploadSection({
           selectedEpochs,
           targetFolderId,
           targetFolderUploadName,
+          folderTotalCount,
         );
       }
       setSelectedFiles([]);

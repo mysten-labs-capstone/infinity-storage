@@ -417,6 +417,7 @@ export default function FolderCardView({
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const bulkDeleteSnapshotRef = useRef<FileItem[]>([]);
+  const bulkDeleteFoldersSnapshotRef = useRef<FolderNode[]>([]);
 
   // Drag-to-select state
   const [isSelecting, setIsSelecting] = useState(false);
@@ -2629,36 +2630,68 @@ export default function FolderCardView({
   );
 
   const promptBulkDelete = useCallback(() => {
-    if (bulkDeletableFiles.length === 0) {
+    if (bulkDeletableFiles.length === 0 && selectedFolderIds.size === 0) {
       onShowToast?.({
         message: "Selected files are still uploading and cannot be deleted yet",
       });
       return;
     }
+
+    const selectedFolders = currentLevelFolders.filter((folder) =>
+      selectedFolderIds.has(folder.id),
+    );
+
     bulkDeleteSnapshotRef.current = [...bulkDeletableFiles];
+    bulkDeleteFoldersSnapshotRef.current = [...selectedFolders];
     setBulkDeleteDialogOpen(true);
-  }, [bulkDeletableFiles, onShowToast]);
+  }, [bulkDeletableFiles, selectedFolderIds, currentLevelFolders, onShowToast]);
 
   const confirmBulkDelete = useCallback(async () => {
     const filesToDelete = bulkDeleteSnapshotRef.current;
+    const foldersToDelete = bulkDeleteFoldersSnapshotRef.current;
     bulkDeleteSnapshotRef.current = [];
-    if (filesToDelete.length === 0) return;
+    bulkDeleteFoldersSnapshotRef.current = [];
+    if (filesToDelete.length === 0 && foldersToDelete.length === 0) return;
 
     setBulkDeleteDialogOpen(false);
 
     const user = authService.getCurrentUser();
     if (!user?.id) return;
 
+    // Delete files
     for (const file of filesToDelete) {
       setLocallyDeletedBlobIds((prev) => new Set(prev).add(file.blobId));
       removeCachedFile(file.blobId);
     }
 
+    // Optimistically remove folders from UI
+    for (const folder of foldersToDelete) {
+      onFolderDeletedOptimistic?.(folder.id);
+    }
+
     setSelectedFileIds(new Set());
     setSelectedFolderIds(new Set());
-    onFileDeleted?.(filesToDelete[0].blobId);
-    onShowToast?.({ message: `Deleted ${filesToDelete.length} files` });
 
+    // Trigger refresh
+    if (filesToDelete.length > 0) {
+      onFileDeleted?.(filesToDelete[0].blobId);
+    }
+    if (foldersToDelete.length > 0) {
+      onFolderDeleted?.();
+    }
+
+    const itemsText = [];
+    if (filesToDelete.length > 0)
+      itemsText.push(
+        `${filesToDelete.length} file${filesToDelete.length !== 1 ? "s" : ""}`,
+      );
+    if (foldersToDelete.length > 0)
+      itemsText.push(
+        `${foldersToDelete.length} folder${foldersToDelete.length !== 1 ? "s" : ""}`,
+      );
+    onShowToast?.({ message: `Deleted ${itemsText.join(" and ")}` });
+
+    // Delete files in background
     for (const file of filesToDelete) {
       try {
         await deleteBlob(file.blobId, user.id);
@@ -2666,7 +2699,23 @@ export default function FolderCardView({
         console.error(`Failed to delete ${file.name}:`, err);
       }
     }
-  }, [onFileDeleted, onShowToast]);
+
+    // Delete folders in background
+    for (const folder of foldersToDelete) {
+      try {
+        const res = await fetch(
+          apiUrl(`/api/folders/${folder.id}?userId=${user.id}`),
+          { method: "DELETE" },
+        );
+        if (!res.ok) {
+          const data = await res.json();
+          console.error(`Failed to delete folder ${folder.name}:`, data.error);
+        }
+      } catch (err) {
+        console.error(`Failed to delete folder ${folder.name}:`, err);
+      }
+    }
+  }, [onFileDeleted, onFolderDeleted, onFolderDeletedOptimistic, onShowToast]);
 
   const downloadFolder = useCallback(
     async (folderId: string) => {
@@ -2760,6 +2809,169 @@ export default function FolderCardView({
     },
     [privateKey, requestReauth, folders, files, findFolderById, onShowToast],
   );
+
+  const bulkDownloadFoldersAndFiles = useCallback(async () => {
+    if (!privateKey || privateKey.trim() === "") {
+      requestReauth(() => bulkDownloadFoldersAndFiles());
+      return;
+    }
+
+    const selectedFiles = currentLevelFiles.filter((f) =>
+      selectedFileIds.has(f.blobId),
+    );
+    const selectedFolders = currentLevelFolders.filter((folder) =>
+      selectedFolderIds.has(folder.id),
+    );
+
+    if (selectedFiles.length === 0 && selectedFolders.length === 0) return;
+
+    // If only one file is selected (no folders), download it directly
+    if (selectedFiles.length === 1 && selectedFolders.length === 0) {
+      const f = selectedFiles[0];
+      downloadFile(f.blobId, f.name, f.encrypted);
+      return;
+    }
+
+    // If only one folder is selected (no files), download it directly
+    if (selectedFolders.length === 1 && selectedFiles.length === 0) {
+      downloadFolder(selectedFolders[0].id);
+      return;
+    }
+
+    setBulkDownloading(true);
+    try {
+      const zip = new JSZip();
+      const user = authService.getCurrentUser();
+
+      // Helper to collect all folder IDs recursively
+      const collectFolderIds = (node: FolderNode): string[] => [
+        node.id,
+        ...node.children.flatMap(collectFolderIds),
+      ];
+
+      // Helper to build folder path relative to a root
+      const buildFolderPath = (
+        fId: string,
+        excludeFirstLevel = false,
+      ): string => {
+        const parts: string[] = [];
+        let current = findFolderById(folders, fId);
+        while (current) {
+          parts.unshift(current.name);
+          if (!current.parentId) break;
+          current = findFolderById(folders, current.parentId);
+        }
+        if (excludeFirstLevel && parts.length > 0) {
+          parts.shift();
+        }
+        return parts.join("/");
+      };
+
+      // Download selected files
+      for (const file of selectedFiles) {
+        try {
+          const res = await downloadBlob(
+            file.blobId,
+            privateKey || "",
+            file.name,
+            user?.id,
+          );
+          if (!res.ok || ("presigned" in res && res.presigned)) continue;
+
+          let fileBlob = await (res as Response).blob();
+          if (privateKey && fileBlob.size > 0) {
+            const result = await decryptWalrusBlob(
+              fileBlob,
+              privateKey,
+              file.name || file.blobId,
+            );
+            if (result) fileBlob = result.blob;
+          }
+          zip.file(file.name, fileBlob);
+        } catch (err) {
+          console.error(`Failed to download ${file.name}:`, err);
+        }
+      }
+
+      // Download selected folders
+      for (const folder of selectedFolders) {
+        const allFolderIds = new Set(collectFolderIds(folder));
+        const folderFiles = files.filter(
+          (f) => f.folderId && allFolderIds.has(f.folderId),
+        );
+
+        for (const file of folderFiles) {
+          try {
+            const res = await downloadBlob(
+              file.blobId,
+              privateKey || "",
+              file.name,
+              user?.id,
+            );
+            if (!res.ok || ("presigned" in res && res.presigned)) continue;
+
+            let fileBlob = await (res as Response).blob();
+            if (privateKey && fileBlob.size > 0) {
+              const result = await decryptWalrusBlob(
+                fileBlob,
+                privateKey,
+                file.name || file.blobId,
+              );
+              if (result) fileBlob = result.blob;
+            }
+
+            // Build path: folderName/subfolders/file.name
+            const subPath = file.folderId
+              ? buildFolderPath(file.folderId)
+              : folder.name;
+            const filePath = `${subPath}/${file.name}`;
+            zip.file(filePath, fileBlob);
+          } catch (err) {
+            console.error(`Failed to download file ${file.name}:`, err);
+          }
+        }
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(zipBlob);
+      const totalItems = selectedFiles.length + selectedFolders.length;
+      a.download = `download-${totalItems}-items.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+
+      const itemsText = [];
+      if (selectedFiles.length > 0)
+        itemsText.push(
+          `${selectedFiles.length} file${selectedFiles.length !== 1 ? "s" : ""}`,
+        );
+      if (selectedFolders.length > 0)
+        itemsText.push(
+          `${selectedFolders.length} folder${selectedFolders.length !== 1 ? "s" : ""}`,
+        );
+      onShowToast?.({ message: `Downloaded ${itemsText.join(" and ")}` });
+    } catch (err) {
+      console.error("Bulk download failed:", err);
+      onShowToast?.({ message: "Download failed" });
+    } finally {
+      setBulkDownloading(false);
+    }
+  }, [
+    privateKey,
+    requestReauth,
+    currentLevelFiles,
+    currentLevelFolders,
+    selectedFileIds,
+    selectedFolderIds,
+    downloadFile,
+    downloadFolder,
+    folders,
+    files,
+    findFolderById,
+    onShowToast,
+  ]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -4015,29 +4227,25 @@ export default function FolderCardView({
             {selectedFileIds.size + selectedFolderIds.size} selected
           </span>
           <div className="h-3.5 w-px bg-zinc-700" />
-          {selectedFileIds.size > 0 && (
-            <button
-              onClick={bulkDownloadSelected}
-              disabled={bulkDownloading}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-emerald-700/50 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-300 transition-colors disabled:opacity-50"
-            >
-              {bulkDownloading ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Download className="h-3 w-3" />
-              )}
-              {bulkDownloading ? "Downloading..." : "Download"}
-            </button>
-          )}
-          {selectedFileIds.size > 0 && (
-            <button
-              onClick={promptBulkDelete}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-red-800/50 bg-red-900/30 hover:bg-red-900/50 text-red-400 transition-colors"
-            >
-              <Trash2 className="h-3 w-3" />
-              Delete
-            </button>
-          )}
+          <button
+            onClick={bulkDownloadFoldersAndFiles}
+            disabled={bulkDownloading}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-emerald-700/50 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-300 transition-colors disabled:opacity-50"
+          >
+            {bulkDownloading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Download className="h-3 w-3" />
+            )}
+            {bulkDownloading ? "Downloading..." : "Download"}
+          </button>
+          <button
+            onClick={promptBulkDelete}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-red-800/50 bg-red-900/30 hover:bg-red-900/50 text-red-400 transition-colors"
+          >
+            <Trash2 className="h-3 w-3" />
+            Delete
+          </button>
           <button
             onClick={clearSelection}
             className="p-1 rounded-lg hover:bg-zinc-700 text-gray-400 hover:text-white transition-colors"
@@ -4501,9 +4709,33 @@ export default function FolderCardView({
       <DeleteConfirmDialog
         open={bulkDeleteDialogOpen}
         onOpenChange={setBulkDeleteDialogOpen}
-        fileName={`${bulkDeletableFiles.length} file${bulkDeletableFiles.length === 1 ? "" : "s"}`}
-        title={`Delete ${bulkDeletableFiles.length} file${bulkDeletableFiles.length === 1 ? "" : "s"}?`}
-        description="This will permanently remove the selected files from Walrus storage"
+        fileName={(() => {
+          const fileCount = bulkDeletableFiles.length;
+          const folderCount = bulkDeleteFoldersSnapshotRef.current.length;
+          const items = [];
+          if (fileCount > 0)
+            items.push(`${fileCount} file${fileCount === 1 ? "" : "s"}`);
+          if (folderCount > 0)
+            items.push(`${folderCount} folder${folderCount === 1 ? "" : "s"}`);
+          return items.join(" and ");
+        })()}
+        title={(() => {
+          const fileCount = bulkDeletableFiles.length;
+          const folderCount = bulkDeleteFoldersSnapshotRef.current.length;
+          const items = [];
+          if (fileCount > 0)
+            items.push(`${fileCount} file${fileCount === 1 ? "" : "s"}`);
+          if (folderCount > 0)
+            items.push(`${folderCount} folder${folderCount === 1 ? "" : "s"}`);
+          return `Delete ${items.join(" and ")}?`;
+        })()}
+        description={(() => {
+          const folderCount = bulkDeleteFoldersSnapshotRef.current.length;
+          if (folderCount > 0) {
+            return "This will permanently remove the selected items. Files inside folders will be moved to root.";
+          }
+          return "This will permanently remove the selected files from Walrus storage";
+        })()}
         confirmLabel="Delete All"
         onConfirm={confirmBulkDelete}
       />

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { useSearchParams } from "react-router-dom";
@@ -8,7 +8,9 @@ import FolderTree from "./components/SideBar";
 import FolderCardView from "./components/FolderCardView";
 import CreateFolderDialog from "./components/CreateFolderDialog";
 import { InsufficientFundsDialog } from "./components/InsufficientFundsDialog";
+import { ToastContainer, type ToastItem } from "./components/Toast";
 import { getServerOrigin, apiUrl } from "./config/api";
+import { nanoid } from "nanoid";
 import { addCachedFile, CachedFile } from "./lib/fileCache";
 import { buildFolderTree } from "./lib/folderTree";
 import { useDaysPerEpoch } from "./hooks/useDaysPerEpoch";
@@ -27,9 +29,15 @@ import {
   Wallet,
   LogOut,
   DollarSign,
+  Plus,
+  File,
+  FolderUp,
 } from "lucide-react";
+import JSZip from "jszip";
 import { authService } from "./services/authService";
 import { getBalance } from "./services/balanceService";
+import { downloadBlob } from "./services/walrusApi";
+import { decryptWalrusBlob } from "./services/decryptWalrusBlob";
 import "./pages/css/Home.css";
 
 export default function App() {
@@ -40,7 +48,23 @@ export default function App() {
   const [searchParams] = useSearchParams();
   const uploadDialogFromPaymentRef = useRef(false);
   const folderRefreshTimeoutRef = useRef<number | null>(null);
-  const recentlyDeletedFolderIdsRef = useRef<Set<string>>(new Set());
+  const folderLoadRequestIdRef = useRef(0);
+  const recentlyCreatedFoldersRef = useRef<
+    Map<
+      string,
+      {
+        id: string;
+        name: string;
+        parentId: string | null;
+        color: string | null;
+        fileCount: number;
+        childCount: number;
+        children: any[];
+        createdAt: number;
+      }
+    >
+  >(new Map());
+  const RECENTLY_CREATED_FOLDER_TTL_MS = 15000;
   const [uploadedFiles, setUploadedFiles] = useState<CachedFile[]>([]);
   const [epochs, setEpochs] = useState(3); // Default: 3 epochs = 90 days
   const daysPerEpoch = useDaysPerEpoch();
@@ -79,6 +103,7 @@ export default function App() {
   const [folderRefreshKey, setFolderRefreshKey] = useState(0);
   const [sharedFiles, setSharedFiles] = useState<any[]>([]);
   const [folders, setFolders] = useState<any[]>([]);
+  const [hasInitialDataLoaded, setHasInitialDataLoaded] = useState(false);
   const [showInsufficientFundsDialog, setShowInsufficientFundsDialog] =
     useState(false);
   const [insufficientFundsInfo, setInsufficientFundsInfo] = useState<{
@@ -87,14 +112,93 @@ export default function App() {
   } | null>(null);
   const [insufficientFundsContext, setInsufficientFundsContext] = useState<{
     source: "upload" | "shared";
+    uploadType?: "file" | "folder";
     sharedBlobId?: string;
     sharedShareId?: string | null;
   } | null>(null);
+  const [isDraggingExternal, setIsDraggingExternal] = useState(false);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [showMiniNewMenu, setShowMiniNewMenu] = useState(false);
+  const miniNewMenuRef = useRef<HTMLDivElement | null>(null);
+  const [downloadingFolderId, setDownloadingFolderId] = useState<string | null>(
+    null,
+  );
 
-  // Helper function to recursively extract files from dropped folders
+  const showToast = useCallback(
+    (opts: {
+      message: string;
+      undoLabel?: string;
+      onUndo?: () => void;
+      onExpire?: () => void;
+      duration?: number;
+    }) => {
+      const id = nanoid();
+      setToasts([{ id, ...opts }]);
+    },
+    [],
+  );
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // Track external file drags over the window for the drop overlay
+  useEffect(() => {
+    let active = false;
+
+    const show = () => {
+      if (!active) {
+        active = true;
+        setIsDraggingExternal(true);
+      }
+    };
+    const hide = () => {
+      if (active) {
+        active = false;
+        setIsDraggingExternal(false);
+      }
+    };
+
+    const isExternalFileDrag = (e: DragEvent) => {
+      const types = e.dataTransfer?.types;
+      if (!types) return false;
+      if (
+        types.includes("application/x-walrus-file") ||
+        types.includes("application/x-walrus-folder")
+      )
+        return false;
+      return types.includes("Files");
+    };
+
+    const onDragOver = (e: DragEvent) => {
+      if (isExternalFileDrag(e)) show();
+    };
+
+    const onDrop = () => hide();
+    const onDragEnd = () => hide();
+
+    const onDragLeave = (e: DragEvent) => {
+      // relatedTarget is null when the drag leaves the document/window entirely
+      if (e.relatedTarget === null) hide();
+    };
+
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("dragleave", onDragLeave);
+    document.addEventListener("drop", onDrop, true);
+    document.addEventListener("dragend", onDragEnd);
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("dragleave", onDragLeave);
+      document.removeEventListener("drop", onDrop, true);
+      document.removeEventListener("dragend", onDragEnd);
+    };
+  }, []);
+
+  // Helper function to recursively extract files from dropped folders.
+  // Returns the top-level folder name when a single folder is dropped so the
+  // caller can create a matching app folder.
   const extractFilesFromDataTransfer = async (
     dataTransfer: DataTransfer,
-  ): Promise<File[]> => {
+  ): Promise<{ files: File[]; folderName: string | null }> => {
     const files: File[] = [];
     const seen = new Set<string>();
 
@@ -118,7 +222,6 @@ export default function App() {
         }
       } else if (item.isDirectory) {
         const dirReader = (item as FileSystemDirectoryEntry).createReader();
-        // readEntries may need to be called multiple times for large directories
         const readAllEntries = async (): Promise<FileSystemEntry[]> => {
           const allEntries: FileSystemEntry[] = [];
           let batch: FileSystemEntry[];
@@ -142,41 +245,38 @@ export default function App() {
       }
     };
 
-    // Check if browser supports DataTransferItem API
+    let folderName: string | null = null;
+
     if (dataTransfer.items) {
       const items = Array.from(dataTransfer.items);
-      const hasDirectory = items.some((item) => {
-        if (item.kind !== "file") return false;
-        const entry = item.webkitGetAsEntry?.();
-        return !!entry && entry.isDirectory;
-      });
+
+      // Grab all entries up-front; webkitGetAsEntry() may only be called once
+      // per DataTransferItem in some browsers.
+      const entries: (FileSystemEntry | null)[] = items.map((item) =>
+        item.kind === "file" ? (item.webkitGetAsEntry?.() ?? null) : null,
+      );
+
+      const hasDirectory = entries.some((e) => e?.isDirectory);
 
       if (hasDirectory) {
-        for (const item of items) {
-          if (item.kind === "file") {
-            const entry = item.webkitGetAsEntry?.();
-            if (entry) {
-              await traverseFileTree(entry);
-            } else {
-              // Fallback for browsers without webkitGetAsEntry
-              const file = item.getAsFile();
-              if (file) addFile(file);
-            }
+        for (const entry of entries) {
+          if (!entry) continue;
+          if (entry.isDirectory && !folderName) {
+            folderName = entry.name;
           }
+          await traverseFileTree(entry);
         }
       } else {
-        // For plain multi-file drops, prefer FileList for consistency
         Array.from(dataTransfer.files).forEach(addFile);
       }
     } else {
-      // Fallback to dataTransfer.files for older browsers
       Array.from(dataTransfer.files).forEach(addFile);
     }
 
-    // Always merge in dataTransfer.files as a safety net for browsers
-    // that only expose a single item via dataTransfer.items.
+    // Safety net: merge dataTransfer.files for browsers that only expose a
+    // single item via dataTransfer.items.
     Array.from(dataTransfer.files).forEach(addFile);
-    return files;
+    return { files, folderName };
   };
 
   // Close profile menu on click outside
@@ -188,6 +288,21 @@ export default function App() {
     }
   }, [showProfileMenu]);
 
+  // Close mini "+ New" menu on click outside
+  useEffect(() => {
+    if (!showMiniNewMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        miniNewMenuRef.current &&
+        !miniNewMenuRef.current.contains(e.target as Node)
+      ) {
+        setShowMiniNewMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showMiniNewMenu]);
+
   // Check if returning from payment with intent to trigger upload
   useEffect(() => {
     if (
@@ -195,8 +310,11 @@ export default function App() {
       !uploadDialogFromPaymentRef.current
     ) {
       uploadDialogFromPaymentRef.current = true;
-      // Trigger file picker directly
-      window.dispatchEvent(new Event("open-upload-picker"));
+      const event =
+        location.state?.uploadType === "folder"
+          ? "open-folder-upload-picker"
+          : "open-upload-picker";
+      window.dispatchEvent(new Event(event));
     }
   }, [location.state?.openUploadDialog]);
 
@@ -235,30 +353,89 @@ export default function App() {
     loadPrivateKey();
   }, [user?.id, privateKey, setPrivateKey]);
 
+  const insertFolderIntoTree = useCallback((tree: any[], folderNode: any) => {
+    if (folderNode.parentId === null) {
+      return [...tree, folderNode].sort((a, b) =>
+        (a.name ?? "").localeCompare(b.name ?? ""),
+      );
+    }
+
+    const addToParent = (items: any[]): any[] =>
+      items.map((item) => {
+        if (item.id === folderNode.parentId) {
+          return {
+            ...item,
+            children: [...(item.children ?? []), folderNode].sort((a, b) =>
+              (a.name ?? "").localeCompare(b.name ?? ""),
+            ),
+            childCount: (item.childCount ?? item.children?.length ?? 0) + 1,
+          };
+        }
+        if (item.children?.length) {
+          return { ...item, children: addToParent(item.children) };
+        }
+        return item;
+      });
+
+    return addToParent(tree);
+  }, []);
+
+  const mergeRecentlyCreatedFolders = useCallback(
+    (tree: any[]) => {
+      const now = Date.now();
+
+      const hasFolderId = (items: any[], id: string): boolean => {
+        for (const item of items) {
+          if (item.id === id) return true;
+          if (item.children?.length && hasFolderId(item.children, id)) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      let mergedTree = tree;
+      for (const [id, created] of recentlyCreatedFoldersRef.current.entries()) {
+        if (now - created.createdAt > RECENTLY_CREATED_FOLDER_TTL_MS) {
+          recentlyCreatedFoldersRef.current.delete(id);
+          continue;
+        }
+        if (hasFolderId(mergedTree, id)) {
+          recentlyCreatedFoldersRef.current.delete(id);
+          continue;
+        }
+        mergedTree = insertFolderIntoTree(mergedTree, {
+          id: created.id,
+          name: created.name,
+          parentId: created.parentId,
+          color: created.color,
+          fileCount: created.fileCount,
+          childCount: created.childCount,
+          children: created.children,
+        });
+      }
+
+      return mergedTree;
+    },
+    [insertFolderIntoTree],
+  );
+
   const loadFolders = async () => {
     if (!user?.id) {
       setFolders([]);
       return;
     }
+    const requestId = ++folderLoadRequestIdRef.current;
     try {
       const res = await fetch(apiUrl(`/api/folders/tree?userId=${user.id}`));
       if (res.ok) {
         const data = await res.json();
-        let tree = buildFolderTree(data.folders ?? []);
-        const deletedIds = recentlyDeletedFolderIdsRef.current;
-        if (deletedIds.size > 0) {
-          const filterDeleted = (nodes: any[]): any[] =>
-            nodes
-              .filter((n) => !deletedIds.has(n.id))
-              .map((n) => ({
-                ...n,
-                children: filterDeleted(n.children),
-                childCount: 0,
-              }))
-              .map((n) => ({ ...n, childCount: n.children.length }));
-          tree = filterDeleted(tree);
+        const tree = mergeRecentlyCreatedFolders(
+          buildFolderTree(data.folders ?? []),
+        );
+        if (requestId === folderLoadRequestIdRef.current) {
+          setFolders(tree);
         }
-        setFolders(tree);
       }
     } catch (err) {
       console.error("Failed to fetch folders:", err);
@@ -354,10 +531,10 @@ export default function App() {
   // Load files from server on mount and when user changes
   useEffect(() => {
     let mounted = true;
-    const reloadAll = () => {
-      loadFiles();
-      loadSharedFiles();
-      loadFolders();
+    setHasInitialDataLoaded(false);
+    const reloadAll = async () => {
+      await Promise.all([loadFiles(), loadSharedFiles(), loadFolders()]);
+      if (mounted) setHasInitialDataLoaded(true);
     };
 
     reloadAll();
@@ -442,8 +619,11 @@ export default function App() {
   useEffect(() => {
     const state = (location.state as any) || {};
 
-    if (state.openUploadPicker) {
-      window.dispatchEvent(new Event("open-upload-picker"));
+    if (state.openUploadPicker || state.openFolderUploadPicker) {
+      const event = state.openFolderUploadPicker
+        ? "open-folder-upload-picker"
+        : "open-upload-picker";
+      window.dispatchEvent(new Event(event));
       navigate(location.pathname + window.location.search, {
         replace: true,
         state: {},
@@ -452,8 +632,11 @@ export default function App() {
     }
     // If returning from payment page with openUploadAfterPayment flag
     if (state.openUploadAfterPayment) {
-      window.dispatchEvent(new Event("open-upload-picker"));
-      // Clear the state so it doesn't re-open on future navigations
+      const event =
+        state.openUploadAfterPayment === "folder"
+          ? "open-folder-upload-picker"
+          : "open-upload-picker";
+      window.dispatchEvent(new Event(event));
       navigate(location.pathname + window.location.search, {
         replace: true,
         state: {},
@@ -465,8 +648,12 @@ export default function App() {
     const openUploadAfterPayment = sessionStorage.getItem(
       "openUploadAfterPayment",
     );
-    if (openUploadAfterPayment === "true") {
-      window.dispatchEvent(new Event("open-upload-picker"));
+    if (openUploadAfterPayment) {
+      const event =
+        openUploadAfterPayment === "folder"
+          ? "open-folder-upload-picker"
+          : "open-upload-picker";
+      window.dispatchEvent(new Event(event));
       sessionStorage.removeItem("openUploadAfterPayment");
       return;
     }
@@ -500,11 +687,8 @@ export default function App() {
   useEffect(() => {
     const handleLazyUpload = (e: CustomEvent) => {
       const file = e.detail;
-      // Add to cache for persistence across sessions
       addCachedFile(file);
       setUploadedFiles((prev) => {
-        // If a file with this blobId already exists (e.g., from a failed upload that later succeeded),
-        // replace it with the updated version instead of adding a duplicate
         const filtered = prev.filter((f) => f.blobId !== file.blobId);
         return [file, ...filtered];
       });
@@ -518,6 +702,17 @@ export default function App() {
         "lazy-upload-finished",
         handleLazyUpload as EventListener,
       );
+  }, []);
+
+  // Refresh folder tree when a folder is created from a drag-and-drop
+  useEffect(() => {
+    const handler = () => {
+      loadFolders();
+      setFolderRefreshKey((prev) => prev + 1);
+    };
+    window.addEventListener("folder-created-from-drop", handler);
+    return () =>
+      window.removeEventListener("folder-created-from-drop", handler);
   }, []);
 
   // Convert CachedFile to FileItem format for FolderCardView
@@ -616,7 +811,6 @@ export default function App() {
     parentId: string | null;
     color: string | null;
   }) => {
-    setFolderRefreshKey((prev) => prev + 1);
     setCreateFolderDialogOpen(false);
 
     // Optimistically add the new folder to state immediately
@@ -631,10 +825,17 @@ export default function App() {
         children: [],
       };
 
+      recentlyCreatedFoldersRef.current.set(newFolder.id, {
+        ...folderNode,
+        createdAt: Date.now(),
+      });
+
       setFolders((prev) => {
         // If it's a root folder, add directly
         if (newFolder.parentId === null) {
-          const updated = [...prev, folderNode];
+          return [...prev, folderNode].sort((a, b) =>
+            (a.name ?? "").localeCompare(b.name ?? ""),
+          );
         }
 
         // Otherwise, find parent and add to its children
@@ -643,8 +844,10 @@ export default function App() {
             if (folder.id === newFolder.parentId) {
               return {
                 ...folder,
-                children: [...folder.children, folderNode],
-                childCount: folder.childCount + 1,
+                children: [...folder.children, folderNode].sort((a, b) =>
+                  (a.name ?? "").localeCompare(b.name ?? ""),
+                ),
+                childCount: (folder.childCount ?? folder.children.length) + 1,
               };
             }
             if (folder.children.length > 0) {
@@ -661,16 +864,11 @@ export default function App() {
         return updated;
       });
     }
-
-    // Delay refresh from server to allow optimistic update to render
-    setTimeout(() => {
-      loadFiles();
-      loadFolders();
-    }, 300);
   };
 
   const checkMinimumBalanceOrShowDialog = async (context?: {
     source: "upload" | "shared";
+    uploadType?: "file" | "folder";
     sharedBlobId?: string;
     sharedShareId?: string | null;
   }) => {
@@ -701,7 +899,6 @@ export default function App() {
   };
 
   const handleUploadClick = async () => {
-    // Check minimum balance before opening file picker
     if (!user?.id) {
       window.dispatchEvent(new Event("open-upload-picker"));
       return;
@@ -709,11 +906,26 @@ export default function App() {
 
     const hasBalance = await checkMinimumBalanceOrShowDialog({
       source: "upload",
+      uploadType: "file",
     });
     if (!hasBalance) return;
 
-    // Trigger file picker directly
     window.dispatchEvent(new Event("open-upload-picker"));
+  };
+
+  const handleFolderUploadClick = async () => {
+    if (!user?.id) {
+      window.dispatchEvent(new Event("open-folder-upload-picker"));
+      return;
+    }
+
+    const hasBalance = await checkMinimumBalanceOrShowDialog({
+      source: "upload",
+      uploadType: "folder",
+    });
+    if (!hasBalance) return;
+
+    window.dispatchEvent(new Event("open-folder-upload-picker"));
   };
 
   const handleFileQueued = () => {
@@ -742,6 +954,10 @@ export default function App() {
         blobIds.includes(f.blobId) ? { ...f, folderId: newFolderId } : f,
       ),
     );
+
+    showToast({
+      message: "File moved",
+    });
   };
 
   const handleFilesDroppedToRoot = async (blobIds: string[]) => {
@@ -1008,29 +1224,26 @@ export default function App() {
       const result = insertFolder(withoutMoved);
       return result;
     });
+    showToast({ message: "Folder moved" });
   };
 
   const handleFolderDeletedOptimistic = (folderId: string) => {
-    recentlyDeletedFolderIdsRef.current.add(folderId);
-    window.setTimeout(() => {
-      recentlyDeletedFolderIdsRef.current.delete(folderId);
-    }, 8000);
-
-    // Optimistically remove folder from UI immediately
     setFolders((prev) => {
       const removeFolder = (folderList: any[]): any[] => {
         return folderList
           .filter((folder) => folder.id !== folderId)
-          .map((folder) => ({
-            ...folder,
-            children: removeFolder(folder.children),
-            childCount: removeFolder(folder.children).length,
-          }));
+          .map((folder) => {
+            const children = removeFolder(folder.children || []);
+            return {
+              ...folder,
+              children,
+              childCount: children.length,
+            };
+          });
       };
       return removeFolder(prev);
     });
 
-    // If the deleted folder was selected, deselect it
     if (selectedFolderId === folderId) {
       setSelectedFolderId(null);
     }
@@ -1038,12 +1251,152 @@ export default function App() {
 
   const handleFolderDeleted = () => {
     setFolderRefreshKey((prev) => prev + 1);
-    loadFiles(); // Refresh files (moved to root); do not refetch folders to avoid stale response bringing the folder back
+    loadFiles();
   };
+
+  const doActualFolderDelete = useCallback(async (folderId: string) => {
+    const u = authService.getCurrentUser();
+    if (!u?.id) return false;
+    try {
+      const res = await fetch(
+        apiUrl(`/api/folders/${folderId}?userId=${u.id}`),
+        { method: "DELETE" },
+      );
+      if (res.ok) {
+        handleFolderDeletedOptimistic(folderId);
+        handleFolderDeleted();
+        // Don't call loadFolders() here - the optimistic update already handles the UI
+        // and calling loadFolders() can cause the folder to briefly reappear if the
+        // backend hasn't fully propagated the deletion yet
+        return true;
+      }
+
+      const data = await res.json();
+      alert(data.error || "Failed to delete folder");
+      await loadFolders();
+      return false;
+    } catch (err) {
+      console.error("Failed to delete folder:", err);
+      await loadFolders();
+      return false;
+    }
+  }, []);
+
+  const handleRequestFolderDelete = useCallback(
+    async (folderId: string, folderName: string) => {
+      const deleted = await doActualFolderDelete(folderId);
+      if (deleted) {
+        showToast({ message: `Folder "${folderName}" deleted` });
+      }
+    },
+    [showToast, doActualFolderDelete],
+  );
 
   const handleSharedFilesRefresh = () => {
     loadSharedFiles(); // Refresh shared files list
   };
+
+  const findFolderByIdInTree = useCallback((tree: any[], id: string): any => {
+    for (const node of tree) {
+      if (node.id === id) return node;
+      const found = findFolderByIdInTree(node.children || [], id);
+      if (found) return found;
+    }
+    return null;
+  }, []);
+
+  const handleDownloadFolder = useCallback(
+    async (folderId: string) => {
+      if (!privateKey || privateKey.trim() === "") return;
+
+      const targetFolder = findFolderByIdInTree(folders, folderId);
+      if (!targetFolder) return;
+
+      setDownloadingFolderId(folderId);
+      try {
+        const collectIds = (node: any): string[] => [
+          node.id,
+          ...(node.children || []).flatMap(collectIds),
+        ];
+        const allFolderIds = new Set(collectIds(targetFolder));
+
+        const folderFiles = uploadedFiles.filter(
+          (f) => f.folderId && allFolderIds.has(f.folderId),
+        );
+
+        if (folderFiles.length === 0) {
+          showToast({ message: "Folder is empty" });
+          return;
+        }
+
+        const buildPath = (fId: string, rootId: string): string => {
+          const parts: string[] = [];
+          let cur = findFolderByIdInTree(folders, fId);
+          while (cur && cur.id !== rootId) {
+            parts.unshift(cur.name);
+            if (!cur.parentId) break;
+            cur = findFolderByIdInTree(folders, cur.parentId);
+          }
+          return parts.join("/");
+        };
+
+        const zip = new JSZip();
+
+        for (const file of folderFiles) {
+          try {
+            const res = await downloadBlob(
+              file.blobId,
+              privateKey || "",
+              file.name,
+              user?.id,
+            );
+            if (!res.ok || ("presigned" in res && res.presigned)) continue;
+
+            let fileBlob = await (res as Response).blob();
+
+            if (privateKey && fileBlob.size > 0) {
+              const result = await decryptWalrusBlob(
+                fileBlob,
+                privateKey,
+                file.name || file.blobId,
+              );
+              if (result) fileBlob = result.blob;
+            }
+
+            const subPath = file.folderId
+              ? buildPath(file.folderId, folderId)
+              : "";
+            const filePath = subPath ? `${subPath}/${file.name}` : file.name;
+            zip.file(filePath, fileBlob);
+          } catch (err) {
+            console.error(`Failed to download file ${file.name}:`, err);
+          }
+        }
+
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(zipBlob);
+        a.download = `${targetFolder.name}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+      } catch (err) {
+        console.error("Failed to download folder:", err);
+        showToast({ message: "Failed to download folder" });
+      } finally {
+        setDownloadingFolderId(null);
+      }
+    },
+    [
+      privateKey,
+      folders,
+      uploadedFiles,
+      showToast,
+      user?.id,
+      findFolderByIdInTree,
+    ],
+  );
 
   return (
     <div className="main-app-container">
@@ -1062,14 +1415,40 @@ export default function App() {
 
             <div className="h-px w-8 sm:w-10 bg-zinc-800 my-1 sm:my-1.5" />
 
-            {/* Upload button */}
-            <button
-              onClick={handleUploadClick}
-              className="p-1 sm:p-1.5 hover:bg-zinc-800 rounded-md transition-colors text-gray-300 hover:text-white"
-              title="Upload"
-            >
-              <Upload className="h-3 w-3 sm:h-4 sm:w-4" />
-            </button>
+            {/* Upload button with dropdown */}
+            <div className="relative" ref={miniNewMenuRef}>
+              <button
+                onClick={() => setShowMiniNewMenu((prev) => !prev)}
+                className="p-1 sm:p-1.5 hover:bg-zinc-800 rounded-md transition-colors text-gray-300 hover:text-white"
+                title="Upload"
+              >
+                <Upload className="h-3 w-3 sm:h-4 sm:w-4" />
+              </button>
+              {showMiniNewMenu && (
+                <div className="absolute left-full top-0 ml-2 bg-zinc-900 rounded-lg shadow-xl border border-zinc-800 py-1.5 z-50 min-w-[160px]">
+                  <button
+                    className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:bg-zinc-800 text-gray-300 text-left transition-colors"
+                    onClick={() => {
+                      setShowMiniNewMenu(false);
+                      handleUploadClick();
+                    }}
+                  >
+                    <File className="h-4 w-4 text-gray-400" />
+                    Upload File
+                  </button>
+                  <button
+                    className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:bg-zinc-800 text-gray-300 text-left transition-colors"
+                    onClick={() => {
+                      setShowMiniNewMenu(false);
+                      handleFolderUploadClick();
+                    }}
+                  >
+                    <FolderUp className="h-4 w-4 text-gray-400" />
+                    Upload Folder
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* All Files / Your Storage */}
             <button
@@ -1131,17 +1510,6 @@ export default function App() {
               title="Expiring Soon"
             >
               <AlertTriangle className="h-3 w-3 sm:h-4 sm:w-4" />
-            </button>
-
-            <div className="h-px w-8 sm:w-10 bg-zinc-800 my-1 sm:my-1.5" />
-
-            {/* Add folder button */}
-            <button
-              onClick={() => handleCreateFolder(selectedFolderId)}
-              className="p-1 sm:p-1.5 hover:bg-zinc-800 rounded-md transition-colors text-gray-300 hover:text-white"
-              title="Create folder"
-            >
-              <FolderPlus className="h-3 w-3 sm:h-4 sm:w-4" />
             </button>
 
             {/* Folder icons (scrollable if many) */}
@@ -1225,9 +1593,11 @@ export default function App() {
                 onRefresh={loadFolders}
                 onFolderDeleted={handleFolderDeleted}
                 onFolderDeletedOptimistic={handleFolderDeletedOptimistic}
+                onRequestFolderDelete={handleRequestFolderDelete}
                 folders={folders}
                 key={folderRefreshKey}
                 onUploadClick={handleUploadClick}
+                onFolderUploadClick={handleFolderUploadClick}
                 onSelectView={(view) => {
                   setCurrentView(view);
                   setSelectedFolderId(null);
@@ -1238,6 +1608,8 @@ export default function App() {
                 onFilesDroppedToFolder={handleFilesDroppedToFolder}
                 onFolderDroppedToRoot={handleFolderDroppedToRoot}
                 onFolderDroppedToFolder={handleFolderDroppedToFolder}
+                onDownloadFolder={handleDownloadFolder}
+                downloadingFolderId={downloadingFolderId}
               />
             </div>
           </div>
@@ -1245,7 +1617,7 @@ export default function App() {
 
         {/* Main Content */}
         <main
-          className={`flex-1 px-4 pt-16 pb-8 sm:px-6 lg:px-8 overflow-auto main-content main-scrollbar transition-all ${sidebarOpen ? "ml-0 sm:ml-64" : "ml-12 sm:ml-16"}`}
+          className={`flex-1 px-4 pt-4 pb-8 sm:px-6 lg:px-8 overflow-auto main-content main-scrollbar transition-all ${sidebarOpen ? "ml-0 sm:ml-64" : "ml-12 sm:ml-16"}`}
           onDragOver={(e) => {
             const isInternalDrag =
               e.dataTransfer.types.includes("application/x-walrus-file") ||
@@ -1266,22 +1638,22 @@ export default function App() {
               e.stopPropagation();
 
               try {
-                // Check balance before proceeding with upload
                 const hasBalance = await checkMinimumBalanceOrShowDialog({
                   source: "upload",
                 });
                 if (!hasBalance) return;
 
-                // Extract files from dropped items (supports folders)
-                const files = await extractFilesFromDataTransfer(
-                  e.dataTransfer,
-                );
+                const { files, folderName } =
+                  await extractFilesFromDataTransfer(e.dataTransfer);
 
                 if (files.length > 0) {
-                  // Trigger file upload with dropped files
                   window.dispatchEvent(
                     new CustomEvent("upload-files-dropped", {
-                      detail: { files, folderId: selectedFolderId },
+                      detail: {
+                        files,
+                        folderId: selectedFolderId,
+                        folderName,
+                      },
                     }),
                   );
                 } else {
@@ -1299,6 +1671,7 @@ export default function App() {
           <FolderCardView
             files={fileItems}
             folders={folders}
+            dataReady={hasInitialDataLoaded}
             currentFolderId={selectedFolderId}
             onFolderChange={setSelectedFolderId}
             onFileDeleted={handleFileDeleted}
@@ -1306,9 +1679,12 @@ export default function App() {
             onFileMovedOptimistic={handleFileMovedOptimistic}
             onFolderDeleted={handleFolderDeleted}
             onFolderDeletedOptimistic={handleFolderDeletedOptimistic}
+            onRequestFolderDelete={handleRequestFolderDelete}
+            onShowToast={showToast}
             onFolderCreated={handleFolderCreated}
             onFolderMovedOptimistic={handleFolderMovedOptimistic}
             onUploadClick={handleUploadClick}
+            onFolderUploadClick={handleFolderUploadClick}
             currentView={currentView}
             sharedFiles={sharedFiles}
             onSharedFilesRefresh={handleSharedFilesRefresh}
@@ -1325,6 +1701,8 @@ export default function App() {
                 prev.map((f) => (f.blobId === blobId ? { ...f, starred } : f)),
               );
             }}
+            onDownloadFolder={handleDownloadFolder}
+            downloadingFolderId={downloadingFolderId}
           />
         </main>
       </div>
@@ -1350,6 +1728,9 @@ export default function App() {
       {/* Upload Toast - Bottom Right Popup */}
       <UploadToast />
 
+      {/* Action toasts - Bottom Left (move, delete with undo) */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       {/* Insufficient Funds Dialog */}
       {insufficientFundsInfo && (
         <InsufficientFundsDialog
@@ -1368,12 +1749,29 @@ export default function App() {
                 }),
               );
             } else {
-              // Set flag in sessionStorage so upload dialog opens when returning from payment
-              sessionStorage.setItem("openUploadAfterPayment", "true");
+              sessionStorage.setItem(
+                "openUploadAfterPayment",
+                insufficientFundsContext?.uploadType === "folder"
+                  ? "folder"
+                  : "file",
+              );
             }
             navigate("/payment");
           }}
         />
+      )}
+
+      {/* Full-screen drop overlay */}
+      {isDraggingExternal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center pointer-events-none">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative flex flex-col items-center gap-4">
+            <Upload className="h-12 w-12 text-emerald-400 animate-bounce" />
+            <p className="text-xl font-semibold text-white">
+              Drop files and folders here to upload
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );

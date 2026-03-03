@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 import { encryptFile, extractFileIdFromBlob } from "../services/crypto";
 import { authService } from "../services/authService";
 import { registerFile, findUserRegistry } from "../services/suiContract";
+import { clearBalanceCache } from "../services/balanceService";
 
 export type QueuedUpload = {
   id: string;
@@ -23,6 +24,8 @@ export type QueuedUpload = {
   retryAfter?: number; // Timestamp when retry should happen
   maxRetries?: number; // Maximum retry attempts (default: 3)
   folderId?: string | null; // Folder to upload into
+  folderUploadName?: string | null; // Name of the dropped folder this file belongs to
+  folderUploadTotalCount?: number; // Original total count of files in this folder upload batch
 };
 
 // User-specific storage keys to prevent queue sharing across accounts
@@ -218,6 +221,8 @@ export function useUploadQueue() {
       paymentAmount?: number,
       epochs?: number,
       folderId?: string | null,
+      folderUploadName?: string | null,
+      folderUploadTotalCount?: number,
     ) => {
       if (!userId) {
         throw new Error("User not authenticated");
@@ -251,6 +256,8 @@ export function useUploadQueue() {
         paymentAmount,
         epochs,
         folderId,
+        folderUploadName: folderUploadName || null,
+        folderUploadTotalCount: folderUploadTotalCount,
       };
 
       const list = await readList(userId);
@@ -586,8 +593,18 @@ export function useUploadQueue() {
             );
           }
 
-          // Trigger balance update
-          window.dispatchEvent(new Event("balance-updated"));
+          // Clear balance cache and refresh transactions after payment
+          // Small delay to ensure database replication completes
+          console.log(
+            "[useUploadQueue] Upload succeeded, waiting 1s for DB sync before clearing cache",
+          );
+          setTimeout(() => {
+            console.log(
+              "[useUploadQueue] Clearing balance cache and dispatching transactions:updated",
+            );
+            clearBalanceCache();
+            window.dispatchEvent(new Event("transactions:updated"));
+          }, 1000);
 
           // S3 upload succeeded — remove from queue immediately.
           // The server's trigger-pending handles Walrus

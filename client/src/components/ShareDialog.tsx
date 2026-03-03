@@ -10,7 +10,14 @@ import {
 } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Calendar, Copy, Check, Link as LinkIcon, Clock } from "lucide-react";
+import {
+  Calendar,
+  Copy,
+  Check,
+  Link as LinkIcon,
+  Clock,
+  Share2,
+} from "lucide-react";
 import { apiUrl } from "../config/api";
 import { useAuth } from "../auth/AuthContext";
 import { authService } from "../services/authService";
@@ -50,6 +57,7 @@ export function ShareDialog({
 
   // Share options
   const [expiresInDays, setExpiresInDays] = useState<number | "">(1);
+  const [tempDays, setTempDays] = useState<string>("1");
   const daysPerEpoch = useDaysPerEpoch();
 
   // Compute remaining lifetime for the file (days). Epochs are network-dependent.
@@ -72,6 +80,13 @@ export function ShareDialog({
   };
 
   const { daysRemaining } = calculateExpiryInfo(uploadedAt, epochs);
+
+  // Sync tempDays when dialog opens or state changes
+  useEffect(() => {
+    if (open) {
+      setTempDays(String(expiresInDays || 1));
+    }
+  }, [open, expiresInDays]);
 
   const handleCreateShare = async () => {
     const user = authService.getCurrentUser();
@@ -251,6 +266,7 @@ export function ShareDialog({
     setError("");
     setCopied(false);
     setExpiresInDays(1);
+    setTempDays("1");
     onClose();
   };
 
@@ -262,145 +278,293 @@ export function ShareDialog({
       }}
       dismissible={false}
     >
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle className="text-white">Share File</DialogTitle>
-          <DialogDescription className="text-gray-300">
-            Create a secure share link for{" "}
-            <strong className="text-white">{filename}</strong>
-          </DialogDescription>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader className="space-y-3 pb-2">
+          <DialogTitle className="flex items-center gap-3 heading font-bold text-white">
+            Share File
+          </DialogTitle>
         </DialogHeader>
 
-        {!shareLink ? (
-          <div className="space-y-4 py-4">
-            {/* Expiration */}
-            <div className="space-y-2">
-              <label
-                htmlFor="expires"
-                className="flex items-center gap-2 text-sm font-medium text-white"
-              >
-                <Calendar className="h-4 w-4 text-emerald-400" />
-                Expires in (days)
-              </label>
-              <Input
-                id="expires"
-                type="number"
-                min="1"
-                value={expiresInDays}
-                max={
-                  Number.isFinite(daysRemaining)
-                    ? String(daysRemaining)
-                    : undefined
-                }
-                onChange={(e) => {
-                  const v = e.target.value ? Number(e.target.value) : "";
-                  if (v === "") return setExpiresInDays("");
-                  // Clamp between 1 and daysRemaining (if finite)
-                  const min = 1;
-                  const max = Number.isFinite(daysRemaining)
-                    ? Math.max(1, daysRemaining)
-                    : undefined;
-                  if (max !== undefined)
-                    setExpiresInDays(Math.min(Math.max(min, v), max));
-                  else setExpiresInDays(Math.max(min, v));
-                }}
-                className="bg-zinc-800 border-zinc-700 text-white"
-              />
-              <p className="text-xs text-gray-300">
-                Link will expire after {expiresInDays || 1} day
-                {(expiresInDays || 1) !== 1 ? "s" : ""}
-                {Number.isFinite(daysRemaining) && (
-                  <span>
-                    {" "}
-                    — file expires in {daysRemaining} day
-                    {daysRemaining !== 1 ? "s" : ""}
-                  </span>
-                )}
+        <div className="space-y-6 pb-6">
+          {/* File Info Box */}
+          <div className="flex items-start gap-4 p-4 rounded-2xl border border-emerald-500/20">
+            <div className="p-3 rounded-xl bg-emerald-500/10">
+              <Share2 className="h-5 w-5 text-emerald-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-white truncate">{filename}</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {Number.isFinite(daysRemaining)
+                  ? `Expires in ${daysRemaining} day${daysRemaining !== 1 ? "s" : ""}`
+                  : "No expiration"}
               </p>
-              {!Number.isFinite(daysRemaining) || daysRemaining > 0 ? null : (
-                <p className="text-xs text-destructive mt-2">
-                  This file has expired on Walrus and cannot be shared.
-                </p>
+            </div>
+          </div>
+
+          {!shareLink ? (
+            <div className="space-y-4">
+              {/* Expiration */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-emerald-400" />
+                  <span className="text-sm font-medium text-white">
+                    Link expires in
+                  </span>
+                </div>
+
+                {/* Custom Themed Slider */}
+                <div className="space-y-3 px-1">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1 relative py-2">
+                      {/* Background track */}
+                      <div className="absolute top-1/2 -translate-y-1/2 h-2 w-full rounded-full bg-slate-800/50" />
+
+                      {/* Progress fill */}
+                      <div
+                        className="absolute top-1/2 -translate-y-1/2 h-2 rounded-full bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 shadow-lg shadow-emerald-500/20 pointer-events-none"
+                        style={{
+                          width: `${((Number(tempDays) || 0) / (Number.isFinite(daysRemaining) ? daysRemaining : 365)) * 100}%`,
+                        }}
+                      />
+
+                      {/* Styled range input */}
+                      <input
+                        type="range"
+                        min="1"
+                        max={
+                          Number.isFinite(daysRemaining) ? daysRemaining : 365
+                        }
+                        value={Number(tempDays) || 1}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setTempDays(value);
+                          setExpiresInDays(Number(value));
+                        }}
+                        className="relative w-full h-2 bg-transparent appearance-none cursor-pointer z-10"
+                        style={{
+                          WebkitAppearance: "none",
+                        }}
+                      />
+
+                      <style>{`
+                      input[type="range"]::-webkit-slider-thumb {
+                        -webkit-appearance: none;
+                        appearance: none;
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 50%;
+                        background: linear-gradient(135deg, #34d399 0%, #14b8a6 100%);
+                        border: 3px solid #0f172a;
+                        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+                        cursor: pointer;
+                        transition: all 0.15s ease;
+                      }
+                      
+                      input[type="range"]::-webkit-slider-thumb:hover {
+                        transform: scale(1.15);
+                        box-shadow: 0 6px 16px rgba(16, 185, 129, 0.5);
+                      }
+                      
+                      input[type="range"]::-webkit-slider-thumb:active {
+                        transform: scale(1.05);
+                      }
+                      
+                      input[type="range"]::-moz-range-thumb {
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 50%;
+                        background: linear-gradient(135deg, #34d399 0%, #14b8a6 100%);
+                        border: 3px solid #0f172a;
+                        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+                        cursor: pointer;
+                        transition: all 0.15s ease;
+                      }
+                      
+                      input[type="range"]::-moz-range-thumb:hover {
+                        transform: scale(1.15);
+                        box-shadow: 0 6px 16px rgba(16, 185, 129, 0.5);
+                      }
+                      
+                      input[type="range"]::-moz-range-thumb:active {
+                        transform: scale(1.05);
+                      }
+                      
+                      input[type="range"]:focus {
+                        outline: none;
+                      }
+                      
+                      /* Hide number input spinner arrows */
+                      input[type="number"]::-webkit-inner-spin-button,
+                      input[type="number"]::-webkit-outer-spin-button {
+                        -webkit-appearance: none;
+                        margin: 0;
+                      }
+                      
+                      input[type="number"] {
+                        -moz-appearance: textfield;
+                      }
+                    `}</style>
+                    </div>
+
+                    {/* Days input inline with slider */}
+                    <div className="flex items-baseline gap-2">
+                      <input
+                        type="number"
+                        value={tempDays}
+                        onChange={(e) => {
+                          const inputValue = e.target.value;
+
+                          // Prevent negative numbers and dash
+                          if (inputValue.includes("-")) {
+                            return;
+                          }
+
+                          // Allow empty string for deletion
+                          if (inputValue === "") {
+                            setTempDays("");
+                            return;
+                          }
+
+                          const num = Number(inputValue);
+                          if (num < 0) {
+                            return;
+                          }
+
+                          setTempDays(inputValue);
+
+                          // Update expiresInDays if valid
+                          const maxDays = Number.isFinite(daysRemaining)
+                            ? daysRemaining
+                            : 365;
+                          if (num >= 1 && num <= maxDays) {
+                            setExpiresInDays(num);
+                          }
+                        }}
+                        onBlur={() => {
+                          // If empty or invalid, default to 1
+                          const num = Number(tempDays);
+                          const maxDays = Number.isFinite(daysRemaining)
+                            ? daysRemaining
+                            : 365;
+
+                          if (tempDays === "" || num < 1) {
+                            setTempDays("1");
+                            setExpiresInDays(1);
+                          } else if (num > maxDays) {
+                            setTempDays(String(maxDays));
+                            setExpiresInDays(maxDays);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          // Prevent minus key, 'e', 'E', '+', and '.'
+                          if (["-", "e", "E", "+", "."].includes(e.key)) {
+                            e.preventDefault();
+                          }
+                        }}
+                        className="w-14 px-2 py-1.5 bg-slate-800/50 border border-emerald-500/30 rounded-lg text-center text-lg font-bold text-white focus:outline-none focus:ring-2 focus:border-emerald-500 focus:ring-emerald-500/20 transition-all"
+                        min="1"
+                        max={
+                          Number.isFinite(daysRemaining)
+                            ? String(daysRemaining)
+                            : "365"
+                        }
+                      />
+                      <span className="text-sm text-gray-400 font-medium whitespace-nowrap">
+                        days
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {!Number.isFinite(daysRemaining) || daysRemaining > 0 ? null : (
+                  <p className="text-xs text-destructive mt-2">
+                    This file has expired on Walrus and cannot be shared.
+                  </p>
+                )}
+              </div>
+
+              {error && (
+                <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
+                  {error}
+                </div>
               )}
             </div>
-
-            {error && (
-              <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-4 py-4">
-            <div className="text-xs text-gray-300 flex items-center gap-2">
-              <Clock className="h-4 w-4 text-emerald-400" />
-              Expires in {expiresInDays || 1} day
-              {(expiresInDays || 1) !== 1 ? "s" : ""}
-            </div>
-            <div className="space-y-2">
-              <label
-                htmlFor="shareLink"
-                className="flex items-center gap-2 text-sm font-medium text-white"
-              >
-                <LinkIcon className="h-4 w-4 text-emerald-400" />
-                Share Link
-              </label>
-              <div className="flex gap-2">
-                <Input
-                  id="shareLink"
-                  value={shareLink}
-                  readOnly
-                  className="font-mono text-xs bg-zinc-800 border-zinc-700 text-white"
-                />
-                <Button
-                  size="icon"
-                  variant="outline"
-                  onClick={handleCopyLink}
-                  disabled={copied}
-                  className="bg-zinc-900 border-zinc-700 hover:bg-zinc-800 text-white shrink-0"
-                >
-                  {copied ? (
-                    <Check className="h-4 w-4 text-emerald-400" />
-                  ) : (
-                    <Copy className="h-4 w-4 text-gray-300" />
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor="shareLink"
+                    className="flex items-center gap-2 text-sm font-medium text-white"
+                  >
+                    <LinkIcon className="h-4 w-4 text-emerald-400" />
+                    Share Link
+                  </label>
+                  <span className="text-xs text-gray-400">
+                    Expires in {expiresInDays || 1} day
+                    {(expiresInDays || 1) !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    id="shareLink"
+                    value={shareLink}
+                    readOnly
+                    className="font-mono text-xs bg-zinc-800 border-zinc-700 text-white"
+                  />
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    onClick={handleCopyLink}
+                    disabled={copied}
+                    className="bg-zinc-900 border-zinc-700 hover:bg-zinc-800 text-white shrink-0"
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4 text-emerald-400" />
+                    ) : (
+                      <Copy className="h-4 w-4 text-gray-300" />
+                    )}
+                  </Button>
+                </div>
+                {/* Fixed height container for copy message to prevent layout shift */}
+                <div className="min-h-[20px]">
+                  {copied && (
+                    <p className="text-xs text-emerald-400">
+                      Link copied to clipboard
+                    </p>
                   )}
-                </Button>
-              </div>
-              {copied && (
-                <p className="text-xs text-emerald-400">
-                  Link copied to clipboard
-                </p>
-              )}
-              {/* QR preview */}
-              <div className="mt-3">
-                {(() => {
-                  // Use the full share link when present so a scan produces the same URL
-                  const qrPayload =
-                    shareLink || (shareKey ? `k=${shareKey}` : "");
-                  const remoteSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
-                    qrPayload || "",
-                  )}`;
-                  const imgSrc = qrDataUrl ?? remoteSrc;
-                  return (
-                    <img
-                      src={imgSrc}
-                      alt="Share QR"
-                      className="w-36 h-36 rounded-md border border-zinc-700 bg-zinc-900 p-2"
-                    />
-                  );
-                })()}
+                </div>
+                {/* QR preview - centered */}
+                <div className="flex justify-center mt-6">
+                  {(() => {
+                    // Use the full share link when present so a scan produces the same URL
+                    const qrPayload =
+                      shareLink || (shareKey ? `k=${shareKey}` : "");
+                    const remoteSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
+                      qrPayload || "",
+                    )}`;
+                    const imgSrc = qrDataUrl ?? remoteSrc;
+                    return (
+                      <img
+                        src={imgSrc}
+                        alt="Share QR"
+                        className="w-36 h-36 rounded-md border border-zinc-700 bg-zinc-900 p-2"
+                      />
+                    );
+                  })()}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex gap-3">
           {!shareLink ? (
             <>
               <Button
                 variant="outline"
                 onClick={handleClose}
-                className="border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-white"
+                className="flex-1 border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-white"
               >
                 Cancel
               </Button>
@@ -410,7 +574,7 @@ export function ShareDialog({
                   loading ||
                   (Number.isFinite(daysRemaining) && daysRemaining <= 0)
                 }
-                className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50"
+                className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50"
               >
                 {loading ? "Creating..." : "Create Share Link"}
               </Button>
@@ -418,7 +582,7 @@ export function ShareDialog({
           ) : (
             <Button
               onClick={handleClose}
-              className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50"
+              className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50"
             >
               Close
             </Button>

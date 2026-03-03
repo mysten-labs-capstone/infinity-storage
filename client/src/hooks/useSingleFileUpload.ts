@@ -3,6 +3,7 @@ import { verifyFile, uploadBlob } from "../services/walrusApi";
 import { encryptFile, extractFileIdFromBlob } from "../services/crypto";
 import { authService } from "../services/authService";
 import { useAuth } from "../auth/AuthContext";
+import { clearBalanceCache } from "../services/balanceService";
 
 export type UploadState = {
   file: File | null;
@@ -114,6 +115,20 @@ export function useSingleFileUpload(
 
         setState((s) => ({ ...s, status: "done", progress: 100 }));
         onUploaded?.({ blobId: resp.blobId, file, encrypted, epochs });
+
+        // Clear balance cache and refresh transactions after payment
+        // Small delay to ensure database replication completes
+        console.log(
+          "[useSingleFileUpload] Upload succeeded, waiting 1s for DB sync before clearing cache",
+        );
+        setTimeout(() => {
+          console.log(
+            "[useSingleFileUpload] Clearing balance cache and dispatching transactions:updated",
+          );
+          clearBalanceCache();
+          window.dispatchEvent(new Event("transactions:updated"));
+        }, 1000);
+
         // Emit event for toast notification
         window.dispatchEvent(
           new CustomEvent("single-file-upload-done", {

@@ -19,6 +19,15 @@ export async function getBalance(
     cachedBalance !== null &&
     Date.now() - cachedAt < BALANCE_TTL_MS;
 
+  console.log(
+    "[balanceService] getBalance called, force:",
+    options?.force,
+    "useCache:",
+    useCache,
+    "inflight:",
+    !!inflight,
+  );
+
   if (useCache) return cachedBalance as number;
 
   if (inflight) return inflight;
@@ -30,6 +39,7 @@ export async function getBalance(
       }
       const data = await response.json();
       const balance = data?.balance ?? 0;
+      console.log("[balanceService] Fetched balance from server:", balance);
       cachedBalance = balance;
       cachedUserId = userId;
       cachedAt = Date.now();
@@ -43,6 +53,7 @@ export async function getBalance(
 }
 
 export function clearBalanceCache() {
+  console.log("[balanceService] Clearing balance cache");
   cachedBalance = null;
   cachedUserId = null;
   cachedAt = 0;

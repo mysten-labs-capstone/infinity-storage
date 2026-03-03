@@ -79,9 +79,9 @@ export function Payment() {
                 // Navigate back to shared view; FolderCardView will resume the save
                 navigate("/home?view=shared");
               } else if (sessionStorage.getItem("openUploadAfterPayment")) {
+                const uploadType = sessionStorage.getItem("openUploadAfterPayment");
                 sessionStorage.removeItem("openUploadAfterPayment");
-                // Navigate back to home and trigger upload dialog
-                navigate("/home", { state: { openUploadDialog: true } });
+                navigate("/home", { state: { openUploadDialog: true, uploadType } });
               }
             }
           } catch (err) {
@@ -214,9 +214,9 @@ export function Payment() {
             // Navigate back to shared view; FolderCardView will resume the save
             navigate("/home?view=shared");
           } else if (sessionStorage.getItem("openUploadAfterPayment")) {
+            const uploadType = sessionStorage.getItem("openUploadAfterPayment");
             sessionStorage.removeItem("openUploadAfterPayment");
-            // Navigate to home and trigger upload dialog
-            navigate("/home", { state: { openUploadDialog: true } });
+            navigate("/home", { state: { openUploadDialog: true, uploadType } });
           }
         } else {
           setMessage({

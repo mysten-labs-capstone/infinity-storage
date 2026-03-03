@@ -53,10 +53,11 @@ export function DialogContent({
 
 interface DialogHeaderProps {
   children: React.ReactNode;
+  className?: string;
 }
 
-export function DialogHeader({ children }: DialogHeaderProps) {
-  return <div className="mb-4 space-y-2">{children}</div>;
+export function DialogHeader({ children, className = "" }: DialogHeaderProps) {
+  return <div className={`mb-4 space-y-2 ${className}`}>{children}</div>;
 }
 
 interface DialogTitleProps {

@@ -21,9 +21,15 @@ import {
   LogOut,
   PanelLeftClose,
   Star,
+  Download,
+  Loader2,
+  Check,
+  X,
+  Plus,
+  File,
+  FolderUp,
 } from "lucide-react";
 import { Button } from "./ui/button";
-import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { apiUrl } from "../config/api";
 import { getBalance } from "../services/balanceService";
 import { authService } from "../services/authService";
@@ -46,7 +52,9 @@ interface FolderTreeProps {
   onRefresh?: () => void;
   onFolderDeleted?: () => void;
   onFolderDeletedOptimistic?: (folderId: string) => void;
+  onRequestFolderDelete?: (folderId: string, folderName: string) => void;
   onUploadClick?: () => void;
+  onFolderUploadClick?: () => void;
   folders: FolderNode[];
   onSelectView?: (
     view:
@@ -72,6 +80,8 @@ interface FolderTreeProps {
     folderIds: string[],
     targetFolderId: string,
   ) => void;
+  onDownloadFolder?: (folderId: string) => void;
+  downloadingFolderId?: string | null;
 }
 
 export default function FolderTree({
@@ -81,7 +91,9 @@ export default function FolderTree({
   onRefresh,
   onFolderDeleted,
   onFolderDeletedOptimistic,
+  onRequestFolderDelete,
   onUploadClick,
+  onFolderUploadClick,
   folders: propFolders,
   onSelectView,
   currentView,
@@ -90,6 +102,8 @@ export default function FolderTree({
   onFilesDroppedToFolder,
   onFolderDroppedToRoot,
   onFolderDroppedToFolder,
+  onDownloadFolder,
+  downloadingFolderId,
 }: FolderTreeProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [foldersSectionExpanded, setFoldersSectionExpanded] = useState(true);
@@ -103,19 +117,14 @@ export default function FolderTree({
   const [dragOverRoot, setDragOverRoot] = useState(false);
   const [dragOverFoldersLabel, setDragOverFoldersLabel] = useState(false);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [showNewMenu, setShowNewMenu] = useState(false);
+  const newMenuRef = useRef<HTMLDivElement | null>(null);
   const { clearPrivateKey } = useAuth();
   const navigate = useNavigate();
   const [balance, setBalance] = useState<number | null>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const user = authService.getCurrentUser();
   const userId = user?.id ?? null;
-
-  // Folder delete modal state
-  const [folderDeleteOpen, setFolderDeleteOpen] = useState(false);
-  const [folderToDelete, setFolderToDelete] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
 
   // Fetch balance
   useEffect(() => {
@@ -133,11 +142,14 @@ export default function FolderTree({
       // Initial fetch
       fetchBalance();
 
-      // Listen for balance update events (triggered after uploads/payments)
+      // Listen for balance update events (triggered after uploads/payments/extends)
       const balanceUpdateHandler = () => {
+        console.log(
+          "[SideBar] Received transactions:updated event, fetching balance with force=true",
+        );
         fetchBalance(true);
       };
-      window.addEventListener("balance-updated", balanceUpdateHandler);
+      window.addEventListener("transactions:updated", balanceUpdateHandler);
 
       const visibilityHandler = () => {
         if (!document.hidden) fetchBalance(true);
@@ -151,7 +163,10 @@ export default function FolderTree({
 
       return () => {
         clearInterval(interval);
-        window.removeEventListener("balance-updated", balanceUpdateHandler);
+        window.removeEventListener(
+          "transactions:updated",
+          balanceUpdateHandler,
+        );
         document.removeEventListener("visibilitychange", visibilityHandler);
       };
     }
@@ -226,7 +241,10 @@ export default function FolderTree({
   };
 
   const handleFoldersLabelDragLeave = (e: React.DragEvent) => {
-    if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) {
+    if (
+      e.currentTarget === e.target ||
+      !e.currentTarget.contains(e.relatedTarget as Node)
+    ) {
       setDragOverFoldersLabel(false);
     }
   };
@@ -357,35 +375,6 @@ export default function FolderTree({
     }
   };
 
-  const handleDelete = async (folderId: string) => {
-    const user = authService.getCurrentUser();
-    if (!user?.id) return;
-
-    // Optimistically update UI immediately
-    onFolderDeletedOptimistic?.(folderId);
-
-    try {
-      const res = await fetch(
-        apiUrl(`/api/folders/${folderId}?userId=${user.id}`),
-        {
-          method: "DELETE",
-        },
-      );
-
-      if (res.ok) {
-        // Success - refresh files only (folder already removed optimistically; refetching folders can bring it back from stale cache)
-        onFolderDeleted?.();
-      } else {
-        const data = await res.json();
-        alert(data.error || "Failed to delete folder");
-        onRefresh?.();
-      }
-    } catch (err) {
-      console.error("Failed to delete folder:", err);
-      onRefresh?.();
-    }
-  };
-
   const renderFolder = (folder: FolderNode, depth: number = 0) => {
     const isExpanded = expandedIds.has(folder.id);
     const isSelected = selectedFolderId === folder.id;
@@ -431,22 +420,44 @@ export default function FolderTree({
           />
 
           {editingId === folder.id ? (
-            <input
-              type="text"
-              value={editingName}
-              onChange={(e) => setEditingName(e.target.value)}
-              onBlur={() => handleRename(folder.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleRename(folder.id);
-                if (e.key === "Escape") {
+            <div className="flex flex-1 items-center gap-0.5 min-w-0">
+              <input
+                type="text"
+                value={editingName}
+                onChange={(e) => setEditingName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleRename(folder.id);
+                  if (e.key === "Escape") {
+                    setEditingId(null);
+                    setEditingName("");
+                  }
+                }}
+                className="flex-1 min-w-0 bg-transparent border-b border-teal-600 outline-none text-sm px-1 text-gray-300"
+                autoFocus
+                onClick={(e) => e.stopPropagation()}
+              />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRename(folder.id);
+                }}
+                className="p-0.5 hover:bg-emerald-800/40 rounded transition-colors text-emerald-400 shrink-0"
+                title="Confirm"
+              >
+                <Check className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
                   setEditingId(null);
                   setEditingName("");
-                }
-              }}
-              className="flex-1 bg-transparent border-b border-teal-600 outline-none text-sm px-1 text-gray-300"
-              autoFocus
-              onClick={(e) => e.stopPropagation()}
-            />
+                }}
+                className="p-0.5 hover:bg-zinc-700 rounded transition-colors text-gray-400 shrink-0"
+                title="Cancel"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
           ) : (
             <span className="flex-1 text-sm truncate">{folder.name}</span>
           )}
@@ -492,6 +503,21 @@ export default function FolderTree({
       return () => document.removeEventListener("click", handleClickOutside);
     }
   }, [showProfileMenu]);
+
+  // Close "+ New" menu on click outside
+  useEffect(() => {
+    if (!showNewMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        newMenuRef.current &&
+        !newMenuRef.current.contains(e.target as Node)
+      ) {
+        setShowNewMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showNewMenu]);
 
   // Custom scroll rail/thumb (visible even when OS hides native scrollbar)
   const scrollInnerRef = useRef<HTMLDivElement | null>(null);
@@ -555,22 +581,55 @@ export default function FolderTree({
           )}
         </div>
         {onUploadClick && (
-          <div className="w-full mt-4">
+          <div className="w-full mt-4 relative" ref={newMenuRef}>
             <Button
-              onClick={() => {
-                const path = window.location.pathname;
-                if (!onUploadClick) return;
-                if (path === "/" || path.startsWith("/home")) {
-                  onUploadClick();
-                } else {
-                  navigate("/home/upload");
-                }
-              }}
-              className="upload-button-main w-full gap-2"
+              onClick={() => setShowNewMenu((prev) => !prev)}
+              className="upload-button-main w-full gap-2 justify-start"
             >
               <Upload className="h-4 w-4" />
               Upload
+              <ChevronDown
+                className={`h-3.5 w-3.5 ml-auto transition-transform ${showNewMenu ? "rotate-180" : ""}`}
+              />
             </Button>
+            {showNewMenu && (
+              <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-900 rounded-lg shadow-xl border border-zinc-800 py-1.5 z-50">
+                <button
+                  className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:bg-zinc-800 text-gray-300 text-left transition-colors"
+                  onClick={() => {
+                    setShowNewMenu(false);
+                    const path = window.location.pathname;
+                    if (path === "/" || path.startsWith("/home")) {
+                      onUploadClick();
+                    } else {
+                      navigate("/home/upload");
+                    }
+                  }}
+                >
+                  <File className="h-4 w-4 text-gray-400" />
+                  Upload File
+                </button>
+                <button
+                  className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:bg-zinc-800 text-gray-300 text-left transition-colors"
+                  onClick={() => {
+                    setShowNewMenu(false);
+                    if (onFolderUploadClick) {
+                      const path = window.location.pathname;
+                      if (path === "/" || path.startsWith("/home")) {
+                        onFolderUploadClick();
+                      } else {
+                        navigate("/home", {
+                          state: { openFolderUploadPicker: true },
+                        });
+                      }
+                    }
+                  }}
+                >
+                  <FolderUp className="h-4 w-4 text-gray-400" />
+                  Upload Folder
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -712,7 +771,11 @@ export default function FolderTree({
                         setFoldersSectionExpanded((prev) => !prev);
                       }}
                       className="p-0.5 hover:bg-zinc-800 rounded text-gray-400 hover:text-gray-300 transition-colors"
-                      title={foldersSectionExpanded ? "Collapse folders" : "Expand folders"}
+                      title={
+                        foldersSectionExpanded
+                          ? "Collapse folders"
+                          : "Expand folders"
+                      }
                     >
                       {foldersSectionExpanded ? (
                         <ChevronDown className="h-4 w-4" />
@@ -728,7 +791,9 @@ export default function FolderTree({
                         onSelectView?.("all");
                       }}
                       className={`flex flex-1 items-center gap-2 pl-1.5 py-1 rounded-md cursor-pointer transition-colors text-gray-300 ${
-                        dragOverFoldersLabel ? "bg-teal-600/20 border border-teal-500/50" : "hover:bg-zinc-800"
+                        dragOverFoldersLabel
+                          ? "bg-teal-600/20 border border-teal-500/50"
+                          : "hover:bg-zinc-800"
                       }`}
                       onDragOver={handleFoldersLabelDragOver}
                       onDragLeave={handleFoldersLabelDragLeave}
@@ -878,13 +943,32 @@ export default function FolderTree({
               onClick={() => setContextMenu(null)}
             />
             <div
-              className="fixed z-[9999] bg-zinc-900 rounded-lg shadow-xl border border-zinc-800 py-1.5 px-2 min-w-[140px]"
+              className="fixed z-[9999] bg-zinc-900 rounded-lg shadow-xl border border-zinc-800 py-1.5 px-2 w-auto whitespace-nowrap"
               style={{
                 top: `${contextMenu.y}px`,
                 left: `${Math.max(8, Math.min(contextMenu.x, window.innerWidth - 190))}px`,
               }}
               onClick={(e) => e.stopPropagation()}
             >
+              {onDownloadFolder && (
+                <button
+                  className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-zinc-800 text-gray-300 text-left disabled:opacity-50"
+                  disabled={downloadingFolderId === contextMenu.folderId}
+                  onClick={() => {
+                    onDownloadFolder(contextMenu.folderId);
+                    setContextMenu(null);
+                  }}
+                >
+                  {downloadingFolderId === contextMenu.folderId ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Download className="h-3 w-3" />
+                  )}
+                  {downloadingFolderId === contextMenu.folderId
+                    ? "Downloading..."
+                    : "Download"}
+                </button>
+              )}
               <button
                 className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-zinc-800 text-gray-300 text-left"
                 onClick={() => {
@@ -903,16 +987,6 @@ export default function FolderTree({
                 <Pencil className="h-3 w-3" />
                 Rename
               </button>
-              <button
-                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-zinc-800 text-gray-300 text-left"
-                onClick={() => {
-                  onCreateFolder(contextMenu.folderId);
-                  setContextMenu(null);
-                }}
-              >
-                <FolderPlus className="h-3 w-3" />
-                New subfolder
-              </button>
               <hr className="my-1 border-zinc-800" />
               <button
                 className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-destructive-20 text-destructive text-left"
@@ -922,12 +996,11 @@ export default function FolderTree({
                     folders
                       .flatMap((f) => f.children)
                       .find((f) => f.id === contextMenu.folderId);
-                  setFolderToDelete(
-                    folder
-                      ? { id: folder.id, name: folder.name }
-                      : { id: contextMenu.folderId, name: "" },
-                  );
-                  setFolderDeleteOpen(true);
+                  if (folder && onRequestFolderDelete) {
+                    onRequestFolderDelete(folder.id, folder.name);
+                  } else if (onRequestFolderDelete) {
+                    onRequestFolderDelete(contextMenu.folderId, "");
+                  }
                   setContextMenu(null);
                 }}
               >
@@ -938,25 +1011,6 @@ export default function FolderTree({
           </>,
           document.body,
         )}
-
-      <DeleteConfirmDialog
-        open={folderDeleteOpen}
-        onOpenChange={(open) => {
-          setFolderDeleteOpen(open);
-          if (!open) setFolderToDelete(null);
-        }}
-        fileName={folderToDelete?.name ?? ""}
-        title={"Delete folder?"}
-        description={
-          "This will permanently delete the folder. Files inside will be moved to the root."
-        }
-        note={"You can move files before deleting if needed."}
-        onConfirm={() => {
-          if (!folderToDelete) return;
-          handleDelete(folderToDelete.id);
-          setFolderToDelete(null);
-        }}
-      />
     </div>
   );
 }

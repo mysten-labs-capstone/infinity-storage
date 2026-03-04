@@ -41,6 +41,7 @@ import {
   X,
   ArrowUp,
   ArrowDown,
+  Search,
 } from "lucide-react";
 import JSZip from "jszip";
 import { Button } from "./ui/button";
@@ -153,7 +154,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-type SortField = "name" | "size" | "uploadedAt";
+type SortField = "name" | "size" | "uploadedAt" | "daysLeft";
 
 function truncateFileName(name: string, maxLength: number = 70): string {
   if (name.length <= maxLength) return name;
@@ -414,6 +415,16 @@ export default function FolderCardView({
   // Sort & filter state
   const [sortBy, setSortBy] = useState<SortField>("uploadedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Clear search when leaving the home/all view
+  useEffect(() => {
+    if (currentView !== "all") {
+      setSearchQuery("");
+    }
+  }, [currentView]);
+
+  const daysPerEpoch = useDaysPerEpoch();
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const bulkDeleteSnapshotRef = useRef<FileItem[]>([]);
@@ -854,30 +865,55 @@ export default function FolderCardView({
     [],
   );
 
+  // Flatten entire folder tree for search
+  const flattenFolders = useCallback(
+    (folderList: FolderNode[]): FolderNode[] => {
+      const result: FolderNode[] = [];
+      const walk = (list: FolderNode[]) => {
+        for (const f of list) {
+          result.push(f);
+          if (f.children.length > 0) walk(f.children);
+        }
+      };
+      walk(folderList);
+      return result;
+    },
+    [],
+  );
+
   // Get folders at current level (only show in 'all' view)
   const currentLevelFolders = useMemo(() => {
+    const trimmed = searchQuery.trim().toLowerCase();
+
     let base: FolderNode[] =
       currentView === "all"
-        ? currentFolderId === null
-          ? folders
-              .filter((f) => f.parentId === null)
-              .filter((f) => !locallyMovedFolderIds.has(f.id))
-          : (() => {
-              const targetFolder = findFolderById(folders, currentFolderId);
-              if (!targetFolder) {
-                console.warn(
-                  "[FolderCardView] Could not find folder with ID:",
-                  currentFolderId,
-                  "in folders:",
-                  folders,
-                );
-              }
-              return targetFolder
-                ? targetFolder.children.filter(
-                    (f) => !locallyMovedFolderIds.has(f.id),
-                  )
-                : [];
-            })()
+        ? trimmed
+          ? // Search mode: flatten all folders and filter by name
+            flattenFolders(folders).filter(
+              (f) =>
+                !locallyMovedFolderIds.has(f.id) &&
+                f.name.toLowerCase().includes(trimmed),
+            )
+          : currentFolderId === null
+            ? folders
+                .filter((f) => f.parentId === null)
+                .filter((f) => !locallyMovedFolderIds.has(f.id))
+            : (() => {
+                const targetFolder = findFolderById(folders, currentFolderId);
+                if (!targetFolder) {
+                  console.warn(
+                    "[FolderCardView] Could not find folder with ID:",
+                    currentFolderId,
+                    "in folders:",
+                    folders,
+                  );
+                }
+                return targetFolder
+                  ? targetFolder.children.filter(
+                      (f) => !locallyMovedFolderIds.has(f.id),
+                    )
+                  : [];
+              })()
         : [];
 
     if (sortBy === "name") {
@@ -896,6 +932,8 @@ export default function FolderCardView({
     sortBy,
     sortDirection,
     findFolderById,
+    flattenFolders,
+    searchQuery,
   ]);
 
   const combinedSharedFiles =
@@ -1249,13 +1287,34 @@ export default function FolderCardView({
 
   // Get files at current level, then apply sort & filter
   const currentLevelFiles = useMemo(() => {
+    const trimmed = searchQuery.trim().toLowerCase();
+
     let base =
       currentView === "all"
-        ? effectiveFiles.filter((f) => f.folderId === currentFolderId)
+        ? trimmed
+          ? // Search mode: search across ALL files regardless of folder
+            effectiveFiles.filter((f) => f.name.toLowerCase().includes(trimmed))
+          : effectiveFiles.filter((f) => f.folderId === currentFolderId)
         : effectiveFiles;
 
+    // Search filter for non-"all" views
+    const searched =
+      currentView !== "all" && trimmed
+        ? base.filter((f) => f.name.toLowerCase().includes(trimmed))
+        : base;
+
     // Sorting
-    const sorted = [...base].sort((a, b) => {
+    const calcDaysLeft = (f: FileItem) => {
+      const totalDays = (f.epochs ?? 3) * daysPerEpoch;
+      const expiry =
+        new Date(f.uploadedAt).getTime() + totalDays * 24 * 60 * 60 * 1000;
+      return Math.max(
+        0,
+        Math.ceil((expiry - Date.now()) / (24 * 60 * 60 * 1000)),
+      );
+    };
+
+    const sorted = [...searched].sort((a, b) => {
       let cmp = 0;
       switch (sortBy) {
         case "name":
@@ -1268,12 +1327,23 @@ export default function FolderCardView({
           cmp =
             new Date(a.uploadedAt).getTime() - new Date(b.uploadedAt).getTime();
           break;
+        case "daysLeft":
+          cmp = calcDaysLeft(a) - calcDaysLeft(b);
+          break;
       }
       return sortDirection === "asc" ? cmp : -cmp;
     });
 
     return sorted;
-  }, [effectiveFiles, currentView, currentFolderId, sortBy, sortDirection]);
+  }, [
+    effectiveFiles,
+    currentView,
+    currentFolderId,
+    sortBy,
+    sortDirection,
+    searchQuery,
+    daysPerEpoch,
+  ]);
 
   const newFileIds = useMemo(() => {
     const newIds = new Set<string>();
@@ -2658,7 +2728,7 @@ export default function FolderCardView({
     const user = authService.getCurrentUser();
     if (!user?.id) return;
 
-    // Delete files
+    // Optimistically hide files and folders from UI
     for (const file of filesToDelete) {
       setLocallyDeletedBlobIds((prev) => new Set(prev).add(file.blobId));
       removeCachedFile(file.blobId);
@@ -2672,48 +2742,99 @@ export default function FolderCardView({
     setSelectedFileIds(new Set());
     setSelectedFolderIds(new Set());
 
-    // Trigger refresh
-    if (filesToDelete.length > 0) {
-      onFileDeleted?.(filesToDelete[0].blobId);
-    }
-    if (foldersToDelete.length > 0) {
-      onFolderDeleted?.();
+    // Delete all files in parallel, then sync UI from server once all are done.
+    // Calling onFileDeleted before deletions complete causes loadFiles() to run
+    // against a server that still has the files, which repopulates uploadedFiles
+    // and causes them to reappear on refresh.
+    // Use allSettled + check res.ok so HTTP error responses (4xx/5xx) are
+    // treated as failures — not silently swallowed — which was the root cause
+    // of deleted files reappearing after a manual page refresh.
+    const fileResults = await Promise.allSettled(
+      filesToDelete.map(async (file) => {
+        const res = await deleteBlob(file.blobId, user.id);
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Delete failed");
+        }
+        return file;
+      }),
+    );
+
+    // Identify files that failed to delete on the server
+    const failedFiles = filesToDelete.filter(
+      (_, i) => fileResults[i].status === "rejected",
+    );
+
+    // Restore failed files in the UI — they still exist on the server, so
+    // removing them from locallyDeletedBlobIds lets them reappear correctly
+    // instead of appearing deleted until the next page reload.
+    if (failedFiles.length > 0) {
+      setLocallyDeletedBlobIds((prev) => {
+        const next = new Set(prev);
+        for (const file of failedFiles) {
+          next.delete(file.blobId);
+        }
+        return next;
+      });
+      filesToDelete.forEach((file, idx) => {
+        if (fileResults[idx].status === "rejected") {
+          console.error(
+            `Failed to delete ${file.name}:`,
+            (fileResults[idx] as PromiseRejectedResult).reason,
+          );
+        }
+      });
     }
 
+    const succeededFileCount = filesToDelete.length - failedFiles.length;
+
+    // Delete all folders in parallel
+    await Promise.all(
+      foldersToDelete.map((folder) =>
+        fetch(apiUrl(`/api/folders/${folder.id}?userId=${user.id}`), {
+          method: "DELETE",
+        })
+          .then(async (res) => {
+            if (!res.ok) {
+              const data = await res.json();
+              console.error(
+                `Failed to delete folder ${folder.name}:`,
+                data.error,
+              );
+            }
+          })
+          .catch((err) =>
+            console.error(`Failed to delete folder ${folder.name}:`, err),
+          ),
+      ),
+    );
+
+    // Show toast with accurate counts based on actual results
     const itemsText = [];
-    if (filesToDelete.length > 0)
+    if (succeededFileCount > 0)
       itemsText.push(
-        `${filesToDelete.length} file${filesToDelete.length !== 1 ? "s" : ""}`,
+        `${succeededFileCount} file${succeededFileCount !== 1 ? "s" : ""}`,
       );
     if (foldersToDelete.length > 0)
       itemsText.push(
         `${foldersToDelete.length} folder${foldersToDelete.length !== 1 ? "s" : ""}`,
       );
-    onShowToast?.({ message: `Deleted ${itemsText.join(" and ")}` });
-
-    // Delete files in background
-    for (const file of filesToDelete) {
-      try {
-        await deleteBlob(file.blobId, user.id);
-      } catch (err) {
-        console.error(`Failed to delete ${file.name}:`, err);
-      }
+    if (itemsText.length > 0) {
+      onShowToast?.({ message: `Deleted ${itemsText.join(" and ")}` });
+    }
+    if (failedFiles.length > 0) {
+      onShowToast?.({
+        message: `Failed to delete ${failedFiles.length} file${failedFiles.length !== 1 ? "s" : ""}`,
+      });
     }
 
-    // Delete folders in background
-    for (const folder of foldersToDelete) {
-      try {
-        const res = await fetch(
-          apiUrl(`/api/folders/${folder.id}?userId=${user.id}`),
-          { method: "DELETE" },
-        );
-        if (!res.ok) {
-          const data = await res.json();
-          console.error(`Failed to delete folder ${folder.name}:`, data.error);
-        }
-      } catch (err) {
-        console.error(`Failed to delete folder ${folder.name}:`, err);
-      }
+    // Trigger server sync AFTER all deletions are complete so loadFiles()
+    // returns data that no longer includes the deleted items.
+    if (filesToDelete.length > 0) {
+      onFileDeleted?.();
+    }
+    if (foldersToDelete.length > 0) {
+      onFolderDeleted?.();
     }
   }, [onFileDeleted, onFolderDeleted, onFolderDeletedOptimistic, onShowToast]);
 
@@ -2988,8 +3109,6 @@ export default function FolderCardView({
     return date.toLocaleDateString();
   };
 
-  const daysPerEpoch = useDaysPerEpoch();
-
   const calculateExpiryInfo = (uploadedAt: string, epochs: number = 3) => {
     const uploadDate = new Date(uploadedAt);
     const totalDays = epochs * daysPerEpoch;
@@ -3122,7 +3241,7 @@ export default function FolderCardView({
           else fileCardRefs.current.delete(f.blobId);
         }}
         onClick={(e) => handleFileClick(f.blobId, e)}
-        className={`file-row group relative rounded-xl border p-4 shadow-sm w-full transition-transform duration-150 origin-center ${newFileIds.has(f.blobId) ? `stagger-${Math.min(fileIndex + 1, 10)}` : "no-animate"} ${
+        className={`file-row group relative rounded-xl border p-4 shadow-sm w-full transition-transform duration-150 origin-center ${openMenuId === f.blobId ? "menu-open" : ""} ${newFileIds.has(f.blobId) ? `stagger-${Math.min(fileIndex + 1, 10)}` : "no-animate"} ${
           isMoving ? "moving-out" : ""
         } ${
           isSelected
@@ -3800,10 +3919,11 @@ export default function FolderCardView({
                 {/* Backdrop to close menu and prevent clicks behind */}
                 <div
                   className="fixed inset-0 z-[100]"
-                  onClick={() => {
+                  onClick={(e) => {
                     // ignore the backdrop click if it's from the same event that
                     // opened the menu (prevents immediate close/flash)
                     if (ignoreBackdropClickRef.current) return;
+                    e.stopPropagation();
                     setOpenMenuId(null);
                     setFileMenuPosition(null);
                     setFileMenuAnchorRect(null);
@@ -4062,48 +4182,118 @@ export default function FolderCardView({
         </div>
       )}
 
-      {/* Sort Toolbar */}
-      {(currentLevelFiles.length > 0 ||
-        currentLevelFolders.length > 0 ||
-        currentFolderId !== null) && (
-        <div
-          className="flex items-center gap-2"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          {(
-            [
-              { key: "name" as SortField, label: "Name" },
-              { key: "size" as SortField, label: "Size" },
-              { key: "uploadedAt" as SortField, label: "Date Added" },
-            ] as const
-          ).map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => {
-                if (sortBy === key) {
-                  setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
-                } else {
-                  setSortBy(key);
-                  setSortDirection(key === "name" ? "asc" : "desc");
-                }
-              }}
-              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
-                sortBy === key
-                  ? "bg-emerald-900/40 border-emerald-700/50 text-emerald-300"
-                  : "border-zinc-700/50 text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
-              }`}
-            >
-              {label}
-              {sortBy === key &&
-                (sortDirection === "asc" ? (
-                  <ArrowUp className="h-3 w-3" />
-                ) : (
-                  <ArrowDown className="h-3 w-3" />
+      {/* Sort Toolbar — only shown on home/all view */}
+      {currentView === "all" &&
+        (currentLevelFiles.length > 0 ||
+          currentLevelFolders.length > 0 ||
+          currentFolderId !== null ||
+          searchQuery.trim() !== "") && (
+          <div
+            className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 w-full"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            {/* Search bar — takes all left space (original size) */}
+            <div className="relative flex items-center min-w-[42rem]">
+              <Search className="absolute left-3 h-4 w-4 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search..."
+                className="w-full pl-10 pr-8 py-1.5 text-sm rounded-lg border border-zinc-700/50 bg-zinc-900 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-700/50 focus:ring-1 focus:ring-emerald-700/30"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 text-gray-500 hover:text-gray-200 transition-colors"
+                  tabIndex={-1}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Sort buttons OR multi-select action bar — centered */}
+            {hasSelection ? (
+              <span
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 h-8 whitespace-nowrap overflow-visible rounded-full border border-teal-600/60 bg-zinc-950 shadow-md shadow-black/30 ring-1 ring-teal-500/20"
+                style={{ alignSelf: "center", minWidth: "max-content" }}
+              >
+                <span className="text-xs text-gray-300 font-medium whitespace-nowrap">
+                  {selectedFileIds.size + selectedFolderIds.size} selected
+                </span>
+                <span className="h-3.5 w-px bg-zinc-700 inline-block" />
+                <button
+                  onClick={bulkDownloadFoldersAndFiles}
+                  disabled={bulkDownloading}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-emerald-700/50 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-300 transition-colors disabled:opacity-50"
+                  title="Download selected"
+                >
+                  {bulkDownloading ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Download className="h-3 w-3" />
+                  )}
+                  {bulkDownloading ? "..." : "Download"}
+                </button>
+                <button
+                  onClick={promptBulkDelete}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-red-800/50 bg-red-900/30 hover:bg-red-900/50 text-red-400 transition-colors"
+                  title="Delete selected"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Delete
+                </button>
+                <button
+                  onClick={clearSelection}
+                  className="p-0.5 rounded-full hover:bg-zinc-700 text-gray-400 hover:text-white transition-colors"
+                  title="Clear selection"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ) : (
+              <div className="flex items-center gap-2">
+                {(
+                  [
+                    { key: "name" as SortField, label: "Name" },
+                    { key: "size" as SortField, label: "Size" },
+                    { key: "uploadedAt" as SortField, label: "Date Added" },
+                    { key: "daysLeft" as SortField, label: "Days Left" },
+                  ] as const
+                ).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      if (sortBy === key) {
+                        setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+                      } else {
+                        setSortBy(key);
+                        setSortDirection(key === "name" ? "asc" : "desc");
+                      }
+                    }}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
+                      sortBy === key
+                        ? "bg-emerald-900/40 border-emerald-700/50 text-emerald-300"
+                        : "border-zinc-700/50 text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
+                    }`}
+                  >
+                    {label}
+                    {sortBy === key &&
+                      (sortDirection === "asc" ? (
+                        <ArrowUp className="h-3 w-3" />
+                      ) : (
+                        <ArrowDown className="h-3 w-3" />
+                      ))}
+                  </button>
                 ))}
-            </button>
-          ))}
-        </div>
-      )}
+              </div>
+            )}
+
+            {/* Right spacer to balance grid */}
+            <div />
+          </div>
+        )}
 
       {/* Breadcrumb Navigation - only show for folder views */}
       {currentView === "all" && currentFolderId !== null && (
@@ -4217,69 +4407,29 @@ export default function FolderCardView({
         </div>
       )}
 
-      {/* Multi-select action bar — fixed bottom center */}
-      {dataReady && hasSelection && (
-        <div
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-4 py-2.5 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-xl shadow-2xl"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <span className="text-xs text-gray-300 font-medium whitespace-nowrap">
-            {selectedFileIds.size + selectedFolderIds.size} selected
-          </span>
-          <div className="h-3.5 w-px bg-zinc-700" />
-          <button
-            onClick={bulkDownloadFoldersAndFiles}
-            disabled={bulkDownloading}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-emerald-700/50 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-300 transition-colors disabled:opacity-50"
-          >
-            {bulkDownloading ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Download className="h-3 w-3" />
-            )}
-            {bulkDownloading ? "Downloading..." : "Download"}
-          </button>
-          <button
-            onClick={promptBulkDelete}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-red-800/50 bg-red-900/30 hover:bg-red-900/50 text-red-400 transition-colors"
-          >
-            <Trash2 className="h-3 w-3" />
-            Delete
-          </button>
-          <button
-            onClick={clearSelection}
-            className="p-1 rounded-lg hover:bg-zinc-700 text-gray-400 hover:text-white transition-colors"
-            title="Clear selection"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
+      {/* Multi-select action bar is now inline in the Sort Toolbar above */}
 
       {/* Empty State - Show when no folders exist at root (only in 'all' view) */}
       {dataReady &&
         currentView === "all" &&
+        !searchQuery.trim() &&
         currentFolderId === null &&
         currentLevelFolders.length === 0 &&
         currentLevelFiles.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 w-full max-w-6xl">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full">
               {/* Professional service-style create folder button */}
               <button
                 onClick={() => {
                   setCreateFolderParentId(null);
                   setCreateFolderDialogOpen(true);
                 }}
-                className="group relative rounded-xl border-2 border-emerald-800/50 bg-emerald-950/30 p-4 shadow-sm transition-all duration-200 hover:border-emerald-700/60 hover:bg-emerald-900/20"
+                className="group relative flex items-center gap-3 rounded-xl border border-emerald-800/50 bg-emerald-950/30 p-4 shadow-sm transition-all duration-200 hover:border-emerald-700/60 hover:bg-emerald-900/20"
               >
-                <div className="flex flex-col items-center text-center">
-                  <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
-                    <FolderPlus className="h-10 w-10 text-emerald-400" />
-                  </div>
-                  <p className="font-medium text-gray-100 truncate w-full text-[15px]">
-                    Create New Folder
-                  </p>
-                </div>
+                <FolderPlus className="h-7 w-7 flex-shrink-0 text-emerald-400" />
+                <p className="font-medium text-gray-100 truncate text-base">
+                  Create New Folder
+                </p>
               </button>
             </div>
           </div>
@@ -4288,27 +4438,23 @@ export default function FolderCardView({
       {/* Show create folder prompt when files exist but no folders */}
       {dataReady &&
         currentView === "all" &&
+        !searchQuery.trim() &&
         currentFolderId === null &&
         currentLevelFolders.length === 0 &&
         currentLevelFiles.length > 0 && (
           <div className="mb-6">
-            <h3 className="text-sm font-medium text-gray-300 mb-3">Folders</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <button
                 onClick={() => {
                   setCreateFolderParentId(null);
                   setCreateFolderDialogOpen(true);
                 }}
-                className="group relative rounded-xl border-2 border-emerald-800/50 bg-emerald-950/30 p-4 shadow-sm transition-all duration-200 hover:border-emerald-700/60 hover:bg-emerald-900/20"
+                className="group relative flex items-center gap-3 rounded-xl border border-emerald-800/50 bg-emerald-950/30 p-4 shadow-sm transition-all duration-200 hover:border-emerald-700/60 hover:bg-emerald-900/20"
               >
-                <div className="flex flex-col items-center text-center">
-                  <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
-                    <FolderPlus className="h-10 w-10 text-emerald-400" />
-                  </div>
-                  <p className="font-medium text-gray-100 truncate w-full text-[15px]">
-                    Create New Folder
-                  </p>
-                </div>
+                <FolderPlus className="h-7 w-7 flex-shrink-0 text-emerald-400" />
+                <p className="font-medium text-gray-100 truncate text-base">
+                  Create New Folder
+                </p>
               </button>
             </div>
           </div>
@@ -4317,6 +4463,8 @@ export default function FolderCardView({
       {/* Folders Grid - Show ONLY in 'all' view when at root or in a folder with subfolders */}
       {dataReady && currentView === "all" && currentLevelFolders.length > 0 && (
         <div
+          className="mb-4"
+          style={{ marginBottom: "24px" }}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -4328,10 +4476,7 @@ export default function FolderCardView({
         >
           {/* Small spacer for drag selection start area */}
           <div className="h-2" onMouseDown={handleMouseDown} />
-          {currentFolderId === null && (
-            <h3 className="text-sm font-medium text-gray-300 mb-3">Folders</h3>
-          )}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {currentLevelFolders.map((folder, index) => {
               const isSelected = selectedFolderIds.has(folder.id);
               return (
@@ -4341,7 +4486,7 @@ export default function FolderCardView({
                     if (el) folderCardRefs.current.set(folder.id, el);
                     else folderCardRefs.current.delete(folder.id);
                   }}
-                  className={`folder-card group relative rounded-xl border-2 ${
+                  className={`folder-card group relative rounded-xl border ${
                     isSelected
                       ? "border-emerald-400/70 bg-emerald-900/50"
                       : dragOverFolderId === folder.id
@@ -4351,7 +4496,7 @@ export default function FolderCardView({
                     newFolderIds.has(folder.id)
                       ? `stagger-${Math.min(index + 1, 10)}`
                       : "no-animate"
-                  } ${draggedFile ? "dragging" : ""}`}
+                  } ${openFolderMenuId === folder.id ? "menu-open" : ""} ${draggedFile ? "dragging" : ""}`}
                   draggable={currentView === "all"}
                   onDragStart={(e) => handleFolderDragStart(folder, e)}
                   onDragEnd={handleFolderDragEnd}
@@ -4382,16 +4527,17 @@ export default function FolderCardView({
                     });
                   }}
                 >
-                  <div className="flex flex-col items-center text-center">
-                    <div className="folder-icon-wrapper mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
-                      <Folder
-                        className="h-10 w-10 transition-all duration-300"
-                        style={{ color: folder.color || "#10b981" }}
-                      />
-                    </div>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Folder
+                      className="h-7 w-7 flex-shrink-0 transition-all duration-300"
+                      style={{
+                        color: folder.color || "#10b981",
+                        fill: folder.color || "#10b981",
+                      }}
+                    />
 
                     {editingFolderId === folder.id ? (
-                      <div className="flex items-center gap-1 w-full">
+                      <div className="flex items-center gap-1 flex-1 min-w-0">
                         <input
                           type="text"
                           value={editingFolderName}
@@ -4404,7 +4550,7 @@ export default function FolderCardView({
                               setEditingFolderName("");
                             }
                           }}
-                          className="flex-1 min-w-0 bg-transparent border-b border-emerald-400 outline-none text-[15px] text-center text-gray-100"
+                          className="flex-1 min-w-0 bg-transparent border-b border-emerald-400 outline-none text-[15px] text-gray-100"
                           autoFocus
                           onClick={(e) => e.stopPropagation()}
                         />
@@ -4431,13 +4577,13 @@ export default function FolderCardView({
                         </button>
                       </div>
                     ) : (
-                      <p className="font-medium text-gray-100 truncate w-full text-[15px]">
+                      <p className="font-medium text-gray-100 truncate flex-1 min-w-0 text-base">
                         {folder.name}
                       </p>
                     )}
                   </div>
 
-                  {/* Folder menu button */}
+                  {/* Folder menu button - always visible */}
                   <button
                     ref={(el) => {
                       if (el) folderButtonRefs.current.set(folder.id, el);
@@ -4466,7 +4612,7 @@ export default function FolderCardView({
                         setOpenFolderMenuId(folder.id);
                       }
                     }}
-                    className="absolute top-2 right-2 p-1.5 opacity-0 group-hover:opacity-100 hover:bg-zinc-800 rounded-lg transition-all z-10"
+                    className="absolute top-1/2 right-2 -translate-y-1/2 p-1.5 hover:bg-zinc-800 rounded-lg transition-all z-10"
                   >
                     <MoreVertical className="h-4 w-4 text-gray-400" />
                   </button>
@@ -4480,7 +4626,8 @@ export default function FolderCardView({
                         {/* Backdrop to close menu */}
                         <div
                           className="fixed inset-0 z-[9998]"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setOpenFolderMenuId(null);
                             setFolderMenuPosition(null);
                           }}
@@ -4562,6 +4709,7 @@ export default function FolderCardView({
       {/* Empty State for folder with no files (only in 'all' view) */}
       {dataReady &&
         currentView === "all" &&
+        !searchQuery.trim() &&
         currentFolderId !== null &&
         currentLevelFiles.length === 0 &&
         currentLevelFolders.length === 0 && (
@@ -4577,48 +4725,72 @@ export default function FolderCardView({
             </p>
           </div>
         )}
-      {/* Empty State for special views */}
-      {dataReady && currentView !== "all" && currentLevelFiles.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="empty-state-icon relative mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
-            {currentView === "recents" && (
-              <Clock className="h-12 w-12 text-emerald-400" />
-            )}
-            {currentView === "shared" && (
-              <Share2 className="h-12 w-12 text-emerald-400" />
-            )}
-            {currentView === "expiring" && (
-              <AlertCircle className="h-12 w-12 text-orange-600 dark:text-orange-400" />
-            )}
-            {currentView === "favorites" && (
-              <Star className="h-12 w-12 text-emerald-400" />
-            )}
+      {/* No search results */}
+      {dataReady &&
+        searchQuery.trim() &&
+        currentLevelFolders.length === 0 &&
+        currentLevelFiles.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="relative mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-zinc-800/60 to-zinc-900/60">
+              <Search className="h-12 w-12 text-gray-500" />
+            </div>
+            <h3 className="text-xl font-semibold text-white mb-2">
+              No results for &ldquo;{searchQuery}&rdquo;
+            </h3>
+            <p className="text-gray-400 max-w-md mb-4">
+              No files or folders match your search. Try a different name.
+            </p>
+            <button
+              onClick={() => setSearchQuery("")}
+              className="px-4 py-2 text-sm rounded-lg border border-zinc-700/50 text-gray-300 hover:bg-zinc-800 hover:text-white transition-colors"
+            >
+              Clear search
+            </button>
           </div>
-          <h3 className="text-xl font-semibold text-white mb-2">
-            {currentView === "recents" && "No recently uploaded files"}
-            {currentView === "shared" && "No shared files"}
-            {currentView === "expiring" && "No files expiring soon"}
-            {currentView === "favorites" && "No favorite files yet"}
-          </h3>
-          <p className="text-gray-300 max-w-md">
-            {currentView === "recents" && "Upload some files to see them here."}
-            {currentView === "shared" &&
-              "Share a file to see it here with its share link and expiry information."}
-            {currentView === "expiring" &&
-              "All your files have more than 10 days remaining."}
-            {currentView === "favorites" &&
-              "Mark your favorite files to find them here quickly"}
-          </p>
-        </div>
-      )}
+        )}
+
+      {/* Empty State for special views */}
+      {dataReady &&
+        currentView !== "all" &&
+        !searchQuery.trim() &&
+        currentLevelFiles.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="empty-state-icon relative mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
+              {currentView === "recents" && (
+                <Clock className="h-12 w-12 text-emerald-400" />
+              )}
+              {currentView === "shared" && (
+                <Share2 className="h-12 w-12 text-emerald-400" />
+              )}
+              {currentView === "expiring" && (
+                <AlertCircle className="h-12 w-12 text-orange-600 dark:text-orange-400" />
+              )}
+              {currentView === "favorites" && (
+                <Star className="h-12 w-12 text-emerald-400" />
+              )}
+            </div>
+            <h3 className="text-xl font-semibold text-white mb-2">
+              {currentView === "recents" && "No recently uploaded files"}
+              {currentView === "shared" && "No shared files"}
+              {currentView === "expiring" && "No files expiring soon"}
+              {currentView === "favorites" && "No favorite files yet"}
+            </h3>
+            <p className="text-gray-300 max-w-md">
+              {currentView === "recents" &&
+                "Upload some files to see them here."}
+              {currentView === "shared" &&
+                "Share a file to see it here with its share link and expiry information."}
+              {currentView === "expiring" &&
+                "All your files have more than 10 days remaining."}
+              {currentView === "favorites" &&
+                "Mark your favorite files to find them here quickly"}
+            </p>
+          </div>
+        )}
 
       {/* Files Display - Vertical list for consistency across all views */}
       {dataReady && currentLevelFiles.length > 0 && (
         <div className="w-full">
-          {currentView === "all" && (
-            <h3 className="text-sm font-medium text-gray-300 mb-3">Files</h3>
-          )}
-
           {currentView === "shared" ? (
             <div className="space-y-6">
               <div>

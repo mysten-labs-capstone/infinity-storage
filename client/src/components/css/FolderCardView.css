@@ -142,6 +142,11 @@
   background: rgba(16, 185, 129, 0.08) !important;
 }
 
+.folder-card.menu-open {
+  border-color: rgba(16, 185, 129, 0.4) !important;
+  background: rgba(16, 185, 129, 0.08) !important;
+}
+
 .folder-card:active {
   transform: none;
 }
@@ -217,6 +222,15 @@
 
 .hover-enabled .file-row:hover {
   transform: translateX(4px);
+  background: rgba(16, 185, 129, 0.08) !important;
+  border-color: rgba(16, 185, 129, 0.4) !important;
+}
+
+.file-row.menu-open::before {
+  transform: scaleY(1);
+}
+
+.file-row.menu-open {
   background: rgba(16, 185, 129, 0.08) !important;
   border-color: rgba(16, 185, 129, 0.4) !important;
 }

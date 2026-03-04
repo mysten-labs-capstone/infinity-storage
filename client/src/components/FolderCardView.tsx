@@ -4183,117 +4183,113 @@ export default function FolderCardView({
       )}
 
       {/* Sort Toolbar — only shown on home/all view */}
-      {currentView === "all" &&
-        (currentLevelFiles.length > 0 ||
-          currentLevelFolders.length > 0 ||
-          currentFolderId !== null ||
-          searchQuery.trim() !== "") && (
-          <div
-            className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 w-full"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            {/* Search bar — takes all left space (original size) */}
-            <div className="relative flex items-center min-w-[42rem]">
-              <Search className="absolute left-3 h-4 w-4 text-gray-400 pointer-events-none" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search..."
-                className="w-full pl-10 pr-8 py-1.5 text-sm rounded-lg border border-zinc-700/50 bg-zinc-900 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-700/50 focus:ring-1 focus:ring-emerald-700/30"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 text-gray-500 hover:text-gray-200 transition-colors"
-                  tabIndex={-1}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Sort buttons OR multi-select action bar — centered */}
-            {hasSelection ? (
-              <span
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 h-8 whitespace-nowrap overflow-visible rounded-full border border-teal-600/60 bg-zinc-950 shadow-md shadow-black/30 ring-1 ring-teal-500/20"
-                style={{ alignSelf: "center", minWidth: "max-content" }}
+      {currentView === "all" && (
+        <div
+          className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 w-full"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {/* Search bar — takes all left space (original size) */}
+          <div className="relative flex items-center min-w-[42rem]">
+            <Search className="absolute left-3 h-4 w-4 text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search..."
+              className="w-full pl-10 pr-8 py-1.5 text-sm rounded-lg border border-zinc-700/50 bg-zinc-900 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-700/50 focus:ring-1 focus:ring-emerald-700/30"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2.5 text-gray-500 hover:text-gray-200 transition-colors"
+                tabIndex={-1}
               >
-                <span className="text-xs text-gray-300 font-medium whitespace-nowrap">
-                  {selectedFileIds.size + selectedFolderIds.size} selected
-                </span>
-                <span className="h-3.5 w-px bg-zinc-700 inline-block" />
-                <button
-                  onClick={bulkDownloadFoldersAndFiles}
-                  disabled={bulkDownloading}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-emerald-700/50 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-300 transition-colors disabled:opacity-50"
-                  title="Download selected"
-                >
-                  {bulkDownloading ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Download className="h-3 w-3" />
-                  )}
-                  {bulkDownloading ? "..." : "Download"}
-                </button>
-                <button
-                  onClick={promptBulkDelete}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-red-800/50 bg-red-900/30 hover:bg-red-900/50 text-red-400 transition-colors"
-                  title="Delete selected"
-                >
-                  <Trash2 className="h-3 w-3" />
-                  Delete
-                </button>
-                <button
-                  onClick={clearSelection}
-                  className="p-0.5 rounded-full hover:bg-zinc-700 text-gray-400 hover:text-white transition-colors"
-                  title="Clear selection"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ) : (
-              <div className="flex items-center gap-2">
-                {(
-                  [
-                    { key: "name" as SortField, label: "Name" },
-                    { key: "size" as SortField, label: "Size" },
-                    { key: "uploadedAt" as SortField, label: "Date Added" },
-                    { key: "daysLeft" as SortField, label: "Days Left" },
-                  ] as const
-                ).map(({ key, label }) => (
-                  <button
-                    key={key}
-                    onClick={() => {
-                      if (sortBy === key) {
-                        setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
-                      } else {
-                        setSortBy(key);
-                        setSortDirection(key === "name" ? "asc" : "desc");
-                      }
-                    }}
-                    className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
-                      sortBy === key
-                        ? "bg-emerald-900/40 border-emerald-700/50 text-emerald-300"
-                        : "border-zinc-700/50 text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
-                    }`}
-                  >
-                    {label}
-                    {sortBy === key &&
-                      (sortDirection === "asc" ? (
-                        <ArrowUp className="h-3 w-3" />
-                      ) : (
-                        <ArrowDown className="h-3 w-3" />
-                      ))}
-                  </button>
-                ))}
-              </div>
+                <X className="h-3.5 w-3.5" />
+              </button>
             )}
-
-            {/* Right spacer to balance grid */}
-            <div />
           </div>
-        )}
+
+          {/* Sort buttons OR multi-select action bar — centered */}
+          {hasSelection ? (
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 h-8 whitespace-nowrap overflow-visible rounded-full border border-teal-600/60 bg-zinc-950 shadow-md shadow-black/30 ring-1 ring-teal-500/20"
+              style={{ alignSelf: "center", minWidth: "max-content" }}
+            >
+              <span className="text-xs text-gray-300 font-medium whitespace-nowrap">
+                {selectedFileIds.size + selectedFolderIds.size} selected
+              </span>
+              <span className="h-3.5 w-px bg-zinc-700 inline-block" />
+              <button
+                onClick={bulkDownloadFoldersAndFiles}
+                disabled={bulkDownloading}
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-emerald-700/50 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-300 transition-colors disabled:opacity-50"
+                title="Download selected"
+              >
+                {bulkDownloading ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Download className="h-3 w-3" />
+                )}
+                {bulkDownloading ? "..." : "Download"}
+              </button>
+              <button
+                onClick={promptBulkDelete}
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-red-800/50 bg-red-900/30 hover:bg-red-900/50 text-red-400 transition-colors"
+                title="Delete selected"
+              >
+                <Trash2 className="h-3 w-3" />
+                Delete
+              </button>
+              <button
+                onClick={clearSelection}
+                className="p-0.5 rounded-full hover:bg-zinc-700 text-gray-400 hover:text-white transition-colors"
+                title="Clear selection"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ) : (
+            <div className="flex items-center gap-2">
+              {(
+                [
+                  { key: "name" as SortField, label: "Name" },
+                  { key: "size" as SortField, label: "Size" },
+                  { key: "uploadedAt" as SortField, label: "Date Added" },
+                  { key: "daysLeft" as SortField, label: "Days Left" },
+                ] as const
+              ).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    if (sortBy === key) {
+                      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+                    } else {
+                      setSortBy(key);
+                      setSortDirection(key === "name" ? "asc" : "desc");
+                    }
+                  }}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
+                    sortBy === key
+                      ? "bg-emerald-900/40 border-emerald-700/50 text-emerald-300"
+                      : "border-zinc-700/50 text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
+                  }`}
+                >
+                  {label}
+                  {sortBy === key &&
+                    (sortDirection === "asc" ? (
+                      <ArrowUp className="h-3 w-3" />
+                    ) : (
+                      <ArrowDown className="h-3 w-3" />
+                    ))}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Right spacer to balance grid */}
+          <div />
+        </div>
+      )}
 
       {/* Breadcrumb Navigation - only show for folder views */}
       {currentView === "all" && currentFolderId !== null && (
@@ -4409,39 +4405,12 @@ export default function FolderCardView({
 
       {/* Multi-select action bar is now inline in the Sort Toolbar above */}
 
-      {/* Empty State - Show when no folders exist at root (only in 'all' view) */}
+      {/* Create folder prompt — always shown at root when no folders exist (all view) */}
       {dataReady &&
         currentView === "all" &&
         !searchQuery.trim() &&
         currentFolderId === null &&
-        currentLevelFolders.length === 0 &&
-        currentLevelFiles.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full">
-              {/* Professional service-style create folder button */}
-              <button
-                onClick={() => {
-                  setCreateFolderParentId(null);
-                  setCreateFolderDialogOpen(true);
-                }}
-                className="group relative flex items-center gap-3 rounded-xl border border-emerald-800/50 bg-emerald-950/30 p-4 shadow-sm transition-all duration-200 hover:border-emerald-700/60 hover:bg-emerald-900/20"
-              >
-                <FolderPlus className="h-7 w-7 flex-shrink-0 text-emerald-400" />
-                <p className="font-medium text-gray-100 truncate text-base">
-                  Create New Folder
-                </p>
-              </button>
-            </div>
-          </div>
-        )}
-
-      {/* Show create folder prompt when files exist but no folders */}
-      {dataReady &&
-        currentView === "all" &&
-        !searchQuery.trim() &&
-        currentFolderId === null &&
-        currentLevelFolders.length === 0 &&
-        currentLevelFiles.length > 0 && (
+        currentLevelFolders.length === 0 && (
           <div className="mb-6">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <button

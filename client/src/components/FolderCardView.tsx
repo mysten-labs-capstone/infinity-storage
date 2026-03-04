@@ -2728,7 +2728,7 @@ export default function FolderCardView({
     const user = authService.getCurrentUser();
     if (!user?.id) return;
 
-    // Delete files
+    // Optimistically hide files and folders from UI
     for (const file of filesToDelete) {
       setLocallyDeletedBlobIds((prev) => new Set(prev).add(file.blobId));
       removeCachedFile(file.blobId);
@@ -2742,48 +2742,99 @@ export default function FolderCardView({
     setSelectedFileIds(new Set());
     setSelectedFolderIds(new Set());
 
-    // Trigger refresh
-    if (filesToDelete.length > 0) {
-      onFileDeleted?.(filesToDelete[0].blobId);
-    }
-    if (foldersToDelete.length > 0) {
-      onFolderDeleted?.();
+    // Delete all files in parallel, then sync UI from server once all are done.
+    // Calling onFileDeleted before deletions complete causes loadFiles() to run
+    // against a server that still has the files, which repopulates uploadedFiles
+    // and causes them to reappear on refresh.
+    // Use allSettled + check res.ok so HTTP error responses (4xx/5xx) are
+    // treated as failures — not silently swallowed — which was the root cause
+    // of deleted files reappearing after a manual page refresh.
+    const fileResults = await Promise.allSettled(
+      filesToDelete.map(async (file) => {
+        const res = await deleteBlob(file.blobId, user.id);
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Delete failed");
+        }
+        return file;
+      }),
+    );
+
+    // Identify files that failed to delete on the server
+    const failedFiles = filesToDelete.filter(
+      (_, i) => fileResults[i].status === "rejected",
+    );
+
+    // Restore failed files in the UI — they still exist on the server, so
+    // removing them from locallyDeletedBlobIds lets them reappear correctly
+    // instead of appearing deleted until the next page reload.
+    if (failedFiles.length > 0) {
+      setLocallyDeletedBlobIds((prev) => {
+        const next = new Set(prev);
+        for (const file of failedFiles) {
+          next.delete(file.blobId);
+        }
+        return next;
+      });
+      filesToDelete.forEach((file, idx) => {
+        if (fileResults[idx].status === "rejected") {
+          console.error(
+            `Failed to delete ${file.name}:`,
+            (fileResults[idx] as PromiseRejectedResult).reason,
+          );
+        }
+      });
     }
 
+    const succeededFileCount = filesToDelete.length - failedFiles.length;
+
+    // Delete all folders in parallel
+    await Promise.all(
+      foldersToDelete.map((folder) =>
+        fetch(apiUrl(`/api/folders/${folder.id}?userId=${user.id}`), {
+          method: "DELETE",
+        })
+          .then(async (res) => {
+            if (!res.ok) {
+              const data = await res.json();
+              console.error(
+                `Failed to delete folder ${folder.name}:`,
+                data.error,
+              );
+            }
+          })
+          .catch((err) =>
+            console.error(`Failed to delete folder ${folder.name}:`, err),
+          ),
+      ),
+    );
+
+    // Show toast with accurate counts based on actual results
     const itemsText = [];
-    if (filesToDelete.length > 0)
+    if (succeededFileCount > 0)
       itemsText.push(
-        `${filesToDelete.length} file${filesToDelete.length !== 1 ? "s" : ""}`,
+        `${succeededFileCount} file${succeededFileCount !== 1 ? "s" : ""}`,
       );
     if (foldersToDelete.length > 0)
       itemsText.push(
         `${foldersToDelete.length} folder${foldersToDelete.length !== 1 ? "s" : ""}`,
       );
-    onShowToast?.({ message: `Deleted ${itemsText.join(" and ")}` });
-
-    // Delete files in background
-    for (const file of filesToDelete) {
-      try {
-        await deleteBlob(file.blobId, user.id);
-      } catch (err) {
-        console.error(`Failed to delete ${file.name}:`, err);
-      }
+    if (itemsText.length > 0) {
+      onShowToast?.({ message: `Deleted ${itemsText.join(" and ")}` });
+    }
+    if (failedFiles.length > 0) {
+      onShowToast?.({
+        message: `Failed to delete ${failedFiles.length} file${failedFiles.length !== 1 ? "s" : ""}`,
+      });
     }
 
-    // Delete folders in background
-    for (const folder of foldersToDelete) {
-      try {
-        const res = await fetch(
-          apiUrl(`/api/folders/${folder.id}?userId=${user.id}`),
-          { method: "DELETE" },
-        );
-        if (!res.ok) {
-          const data = await res.json();
-          console.error(`Failed to delete folder ${folder.name}:`, data.error);
-        }
-      } catch (err) {
-        console.error(`Failed to delete folder ${folder.name}:`, err);
-      }
+    // Trigger server sync AFTER all deletions are complete so loadFiles()
+    // returns data that no longer includes the deleted items.
+    if (filesToDelete.length > 0) {
+      onFileDeleted?.();
+    }
+    if (foldersToDelete.length > 0) {
+      onFolderDeleted?.();
     }
   }, [onFileDeleted, onFolderDeleted, onFolderDeletedOptimistic, onShowToast]);
 
@@ -4141,7 +4192,7 @@ export default function FolderCardView({
             className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 w-full"
             onMouseDown={(e) => e.stopPropagation()}
           >
-            {/* Search bar — takes all left space */}
+            {/* Search bar — takes all left space (original size) */}
             <div className="relative flex items-center min-w-[42rem]">
               <Search className="absolute left-3 h-4 w-4 text-gray-400 pointer-events-none" />
               <input
@@ -4162,42 +4213,82 @@ export default function FolderCardView({
               )}
             </div>
 
-            {/* Sort buttons — centered */}
-            <div className="flex items-center gap-2">
-              {(
-                [
-                  { key: "name" as SortField, label: "Name" },
-                  { key: "size" as SortField, label: "Size" },
-                  { key: "uploadedAt" as SortField, label: "Date Added" },
-                  { key: "daysLeft" as SortField, label: "Days Left" },
-                ] as const
-              ).map(({ key, label }) => (
+            {/* Sort buttons OR multi-select action bar — centered */}
+            {hasSelection ? (
+              <span
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 h-8 whitespace-nowrap overflow-visible rounded-full border border-teal-600/60 bg-zinc-950 shadow-md shadow-black/30 ring-1 ring-teal-500/20"
+                style={{ alignSelf: "center", minWidth: "max-content" }}
+              >
+                <span className="text-xs text-gray-300 font-medium whitespace-nowrap">
+                  {selectedFileIds.size + selectedFolderIds.size} selected
+                </span>
+                <span className="h-3.5 w-px bg-zinc-700 inline-block" />
                 <button
-                  key={key}
-                  onClick={() => {
-                    if (sortBy === key) {
-                      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
-                    } else {
-                      setSortBy(key);
-                      setSortDirection(key === "name" ? "asc" : "desc");
-                    }
-                  }}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
-                    sortBy === key
-                      ? "bg-emerald-900/40 border-emerald-700/50 text-emerald-300"
-                      : "border-zinc-700/50 text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
-                  }`}
+                  onClick={bulkDownloadFoldersAndFiles}
+                  disabled={bulkDownloading}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-emerald-700/50 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-300 transition-colors disabled:opacity-50"
+                  title="Download selected"
                 >
-                  {label}
-                  {sortBy === key &&
-                    (sortDirection === "asc" ? (
-                      <ArrowUp className="h-3 w-3" />
-                    ) : (
-                      <ArrowDown className="h-3 w-3" />
-                    ))}
+                  {bulkDownloading ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Download className="h-3 w-3" />
+                  )}
+                  {bulkDownloading ? "..." : "Download"}
                 </button>
-              ))}
-            </div>
+                <button
+                  onClick={promptBulkDelete}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-red-800/50 bg-red-900/30 hover:bg-red-900/50 text-red-400 transition-colors"
+                  title="Delete selected"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Delete
+                </button>
+                <button
+                  onClick={clearSelection}
+                  className="p-0.5 rounded-full hover:bg-zinc-700 text-gray-400 hover:text-white transition-colors"
+                  title="Clear selection"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ) : (
+              <div className="flex items-center gap-2">
+                {(
+                  [
+                    { key: "name" as SortField, label: "Name" },
+                    { key: "size" as SortField, label: "Size" },
+                    { key: "uploadedAt" as SortField, label: "Date Added" },
+                    { key: "daysLeft" as SortField, label: "Days Left" },
+                  ] as const
+                ).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      if (sortBy === key) {
+                        setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+                      } else {
+                        setSortBy(key);
+                        setSortDirection(key === "name" ? "asc" : "desc");
+                      }
+                    }}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
+                      sortBy === key
+                        ? "bg-emerald-900/40 border-emerald-700/50 text-emerald-300"
+                        : "border-zinc-700/50 text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
+                    }`}
+                  >
+                    {label}
+                    {sortBy === key &&
+                      (sortDirection === "asc" ? (
+                        <ArrowUp className="h-3 w-3" />
+                      ) : (
+                        <ArrowDown className="h-3 w-3" />
+                      ))}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Right spacer to balance grid */}
             <div />
@@ -4316,44 +4407,7 @@ export default function FolderCardView({
         </div>
       )}
 
-      {/* Multi-select action bar — fixed bottom center */}
-      {dataReady && hasSelection && (
-        <div
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-4 py-2.5 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-xl shadow-2xl"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <span className="text-xs text-gray-300 font-medium whitespace-nowrap">
-            {selectedFileIds.size + selectedFolderIds.size} selected
-          </span>
-          <div className="h-3.5 w-px bg-zinc-700" />
-          <button
-            onClick={bulkDownloadFoldersAndFiles}
-            disabled={bulkDownloading}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-emerald-700/50 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-300 transition-colors disabled:opacity-50"
-          >
-            {bulkDownloading ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Download className="h-3 w-3" />
-            )}
-            {bulkDownloading ? "Downloading..." : "Download"}
-          </button>
-          <button
-            onClick={promptBulkDelete}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-red-800/50 bg-red-900/30 hover:bg-red-900/50 text-red-400 transition-colors"
-          >
-            <Trash2 className="h-3 w-3" />
-            Delete
-          </button>
-          <button
-            onClick={clearSelection}
-            className="p-1 rounded-lg hover:bg-zinc-700 text-gray-400 hover:text-white transition-colors"
-            title="Clear selection"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
+      {/* Multi-select action bar is now inline in the Sort Toolbar above */}
 
       {/* Empty State - Show when no folders exist at root (only in 'all' view) */}
       {dataReady &&

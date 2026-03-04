@@ -3,6 +3,7 @@ import { withCORS } from "../_utils/cors";
 import { cacheService } from "@/utils/cacheService";
 import { s3Service } from "@/utils/s3Service";
 import prisma from "../_utils/prisma";
+import { walrusQueue } from "@/utils/walrusQueue";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // 5 minutes for Render/Netlify
@@ -108,76 +109,100 @@ export async function POST(req: Request) {
     }
 
     let blobObjectId = fileRecord.blobObjectId || null;
-    let walrusClient: any = null;
-    let signer: any = null;
-    let suiClient: any = null;
 
-    if (!blobObjectId) {
-      try {
-        const { initWalrus } = await import("@/utils/walrusClient");
-        const walrusInit = await initWalrus();
-        walrusClient = walrusInit.walrusClient;
-        signer = walrusInit.signer;
-        suiClient = walrusInit.suiClient;
+    // Initialize Walrus once — we need the signer address to key the queue,
+    // and we reuse the same client for both resolution and deletion.
+    let walrusClientInstance: any = null;
+    let signerInstance: any = null;
+    let suiClientInstance: any = null;
 
-        const signerAddress = signer.toSuiAddress();
-        const resolvedBlobObjectId = await resolveBlobObjectId(
-          walrusClient,
-          suiClient,
-          signerAddress,
-          blobId,
-        );
-
-        if (!resolvedBlobObjectId) {
-          return NextResponse.json(
-            { error: DECENTRALIZING_DELETE_ERROR },
-            { status: 409, headers: withCORS(req) },
-          );
-        }
-
-        await prisma.file.updateMany({
-          where: { blobId },
-          data: { blobObjectId: resolvedBlobObjectId },
-        });
-
-        blobObjectId = resolvedBlobObjectId;
-      } catch (resolveErr: any) {
-        console.error("Walrus resolve failed:", resolveErr);
-        return NextResponse.json(
-          {
-            error: "Failed to verify Walrus status",
-            details: resolveErr?.message || String(resolveErr),
-          },
-          { status: 500, headers: withCORS(req) },
-        );
-      }
+    try {
+      const { initWalrus } = await import("@/utils/walrusClient");
+      const walrusInit = await initWalrus();
+      walrusClientInstance = walrusInit.walrusClient;
+      signerInstance = walrusInit.signer;
+      suiClientInstance = walrusInit.suiClient;
+    } catch (initErr: any) {
+      console.error("Walrus init failed:", initErr);
+      return NextResponse.json(
+        {
+          error: "Failed to initialize Walrus",
+          details: initErr?.message || String(initErr),
+        },
+        { status: 500, headers: withCORS(req) },
+      );
     }
 
-    // Attempt to delete the blob from Walrus (wallet) if we have the on-chain object ID
-    let walrusDeleted = false;
-    if (blobObjectId) {
-      try {
-        if (!walrusClient || !signer) {
-          const { initWalrus } = await import("@/utils/walrusClient");
-          const walrusInit = await initWalrus();
-          walrusClient = walrusInit.walrusClient;
-          signer = walrusInit.signer;
-        }
-        await walrusClient.executeDeleteBlobTransaction({
-          blobObjectId,
-          signer,
-        });
-        walrusDeleted = true;
-      } catch (walrusErr: any) {
-        console.error("Walrus delete failed:", walrusErr);
+    const signerAddress = signerInstance.toSuiAddress();
+
+    // Resolve blobObjectId from the chain if it wasn't stored in the DB.
+    // This is a read-only RPC call — safe to run outside the queue.
+    if (!blobObjectId) {
+      const resolvedBlobObjectId = await resolveBlobObjectId(
+        walrusClientInstance,
+        suiClientInstance,
+        signerAddress,
+        blobId,
+      );
+
+      if (!resolvedBlobObjectId) {
         return NextResponse.json(
-          {
-            error: "Failed to delete blob from wallet",
-            details: walrusErr?.message || String(walrusErr),
-          },
-          { status: 500, headers: withCORS(req) },
+          { error: DECENTRALIZING_DELETE_ERROR },
+          { status: 409, headers: withCORS(req) },
         );
       }
+
+      await prisma.file.updateMany({
+        where: { blobId },
+        data: { blobObjectId: resolvedBlobObjectId },
+      });
+
+      blobObjectId = resolvedBlobObjectId;
+    }
+
+    // Mark the file as "deleting" in the DB immediately so that any loadFiles()
+    // call (e.g. triggered by a manual page refresh) skips this file while it
+    // is waiting in the queue or being processed. The record is fully deleted
+    // at the end of this handler on success; on failure we reset it below.
+    await prisma.file.updateMany({
+      where: { blobId },
+      data: { status: "deleting" },
+    });
+
+    // Execute the on-chain delete transaction through the serialized queue.
+    // Concurrent SUI transactions from the same signer collide on coin objects /
+    // nonce, causing all but the first to fail with a 500. The queue ensures
+    // only one delete transaction is in-flight at a time per wallet address.
+    let walrusDeleted = false;
+    try {
+      await walrusQueue.enqueue(
+        signerAddress,
+        async () => {
+          await walrusClientInstance.executeDeleteBlobTransaction({
+            blobObjectId,
+            signer: signerInstance,
+          });
+        },
+        // No userId — deletes only need wallet-level serialization,
+        // not the per-user upload concurrency limit.
+      );
+      walrusDeleted = true;
+    } catch (walrusErr: any) {
+      console.error("Walrus delete failed:", walrusErr);
+      // Reset status so the file becomes visible again rather than stuck hidden.
+      await prisma.file
+        .updateMany({
+          where: { blobId },
+          data: { status: "completed" },
+        })
+        .catch(() => {});
+      return NextResponse.json(
+        {
+          error: "Failed to delete blob from wallet",
+          details: walrusErr?.message || String(walrusErr),
+        },
+        { status: 500, headers: withCORS(req) },
+      );
     }
 
     // Delete from S3 cache if exists

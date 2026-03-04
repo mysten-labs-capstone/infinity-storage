@@ -57,10 +57,13 @@ export async function GET(req: Request) {
     if (userId) {
       await purgeExpiredFilesForUser(userId);
 
-      // Fast read: return files as-is, no derived data
+      // Fast read: return files as-is, no derived data.
+      // Exclude files currently being deleted so a page refresh mid-deletion
+      // does not cause them to reappear in the UI.
       const files = await prisma.file.findMany({
         where: {
           userId,
+          status: { not: "deleting" },
           ...(starred === "true" && { starred: true }),
         },
         orderBy: { uploadedAt: "desc" },

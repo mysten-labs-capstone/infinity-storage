@@ -41,6 +41,7 @@ import {
   X,
   ArrowUp,
   ArrowDown,
+  Search,
 } from "lucide-react";
 import JSZip from "jszip";
 import { Button } from "./ui/button";
@@ -153,7 +154,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-type SortField = "name" | "size" | "uploadedAt";
+type SortField = "name" | "size" | "uploadedAt" | "daysLeft";
 
 function truncateFileName(name: string, maxLength: number = 70): string {
   if (name.length <= maxLength) return name;
@@ -414,6 +415,8 @@ export default function FolderCardView({
   // Sort & filter state
   const [sortBy, setSortBy] = useState<SortField>("uploadedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [searchQuery, setSearchQuery] = useState("");
+  const daysPerEpoch = useDaysPerEpoch();
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const bulkDeleteSnapshotRef = useRef<FileItem[]>([]);
@@ -854,30 +857,55 @@ export default function FolderCardView({
     [],
   );
 
+  // Flatten entire folder tree for search
+  const flattenFolders = useCallback(
+    (folderList: FolderNode[]): FolderNode[] => {
+      const result: FolderNode[] = [];
+      const walk = (list: FolderNode[]) => {
+        for (const f of list) {
+          result.push(f);
+          if (f.children.length > 0) walk(f.children);
+        }
+      };
+      walk(folderList);
+      return result;
+    },
+    [],
+  );
+
   // Get folders at current level (only show in 'all' view)
   const currentLevelFolders = useMemo(() => {
+    const trimmed = searchQuery.trim().toLowerCase();
+
     let base: FolderNode[] =
       currentView === "all"
-        ? currentFolderId === null
-          ? folders
-              .filter((f) => f.parentId === null)
-              .filter((f) => !locallyMovedFolderIds.has(f.id))
-          : (() => {
-              const targetFolder = findFolderById(folders, currentFolderId);
-              if (!targetFolder) {
-                console.warn(
-                  "[FolderCardView] Could not find folder with ID:",
-                  currentFolderId,
-                  "in folders:",
-                  folders,
-                );
-              }
-              return targetFolder
-                ? targetFolder.children.filter(
-                    (f) => !locallyMovedFolderIds.has(f.id),
-                  )
-                : [];
-            })()
+        ? trimmed
+          ? // Search mode: flatten all folders and filter by name
+            flattenFolders(folders).filter(
+              (f) =>
+                !locallyMovedFolderIds.has(f.id) &&
+                f.name.toLowerCase().includes(trimmed),
+            )
+          : currentFolderId === null
+            ? folders
+                .filter((f) => f.parentId === null)
+                .filter((f) => !locallyMovedFolderIds.has(f.id))
+            : (() => {
+                const targetFolder = findFolderById(folders, currentFolderId);
+                if (!targetFolder) {
+                  console.warn(
+                    "[FolderCardView] Could not find folder with ID:",
+                    currentFolderId,
+                    "in folders:",
+                    folders,
+                  );
+                }
+                return targetFolder
+                  ? targetFolder.children.filter(
+                      (f) => !locallyMovedFolderIds.has(f.id),
+                    )
+                  : [];
+              })()
         : [];
 
     if (sortBy === "name") {
@@ -896,6 +924,8 @@ export default function FolderCardView({
     sortBy,
     sortDirection,
     findFolderById,
+    flattenFolders,
+    searchQuery,
   ]);
 
   const combinedSharedFiles =
@@ -1249,13 +1279,34 @@ export default function FolderCardView({
 
   // Get files at current level, then apply sort & filter
   const currentLevelFiles = useMemo(() => {
+    const trimmed = searchQuery.trim().toLowerCase();
+
     let base =
       currentView === "all"
-        ? effectiveFiles.filter((f) => f.folderId === currentFolderId)
+        ? trimmed
+          ? // Search mode: search across ALL files regardless of folder
+            effectiveFiles.filter((f) => f.name.toLowerCase().includes(trimmed))
+          : effectiveFiles.filter((f) => f.folderId === currentFolderId)
         : effectiveFiles;
 
+    // Search filter for non-"all" views
+    const searched =
+      currentView !== "all" && trimmed
+        ? base.filter((f) => f.name.toLowerCase().includes(trimmed))
+        : base;
+
     // Sorting
-    const sorted = [...base].sort((a, b) => {
+    const calcDaysLeft = (f: FileItem) => {
+      const totalDays = (f.epochs ?? 3) * daysPerEpoch;
+      const expiry =
+        new Date(f.uploadedAt).getTime() + totalDays * 24 * 60 * 60 * 1000;
+      return Math.max(
+        0,
+        Math.ceil((expiry - Date.now()) / (24 * 60 * 60 * 1000)),
+      );
+    };
+
+    const sorted = [...searched].sort((a, b) => {
       let cmp = 0;
       switch (sortBy) {
         case "name":
@@ -1268,12 +1319,23 @@ export default function FolderCardView({
           cmp =
             new Date(a.uploadedAt).getTime() - new Date(b.uploadedAt).getTime();
           break;
+        case "daysLeft":
+          cmp = calcDaysLeft(a) - calcDaysLeft(b);
+          break;
       }
       return sortDirection === "asc" ? cmp : -cmp;
     });
 
     return sorted;
-  }, [effectiveFiles, currentView, currentFolderId, sortBy, sortDirection]);
+  }, [
+    effectiveFiles,
+    currentView,
+    currentFolderId,
+    sortBy,
+    sortDirection,
+    searchQuery,
+    daysPerEpoch,
+  ]);
 
   const newFileIds = useMemo(() => {
     const newIds = new Set<string>();
@@ -2988,8 +3050,6 @@ export default function FolderCardView({
     return date.toLocaleDateString();
   };
 
-  const daysPerEpoch = useDaysPerEpoch();
-
   const calculateExpiryInfo = (uploadedAt: string, epochs: number = 3) => {
     const uploadDate = new Date(uploadedAt);
     const totalDays = epochs * daysPerEpoch;
@@ -4065,43 +4125,72 @@ export default function FolderCardView({
       {/* Sort Toolbar */}
       {(currentLevelFiles.length > 0 ||
         currentLevelFolders.length > 0 ||
-        currentFolderId !== null) && (
+        currentFolderId !== null ||
+        searchQuery.trim() !== "") && (
         <div
-          className="flex items-center gap-2"
+          className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 w-full"
           onMouseDown={(e) => e.stopPropagation()}
         >
-          {(
-            [
-              { key: "name" as SortField, label: "Name" },
-              { key: "size" as SortField, label: "Size" },
-              { key: "uploadedAt" as SortField, label: "Date Added" },
-            ] as const
-          ).map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => {
-                if (sortBy === key) {
-                  setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
-                } else {
-                  setSortBy(key);
-                  setSortDirection(key === "name" ? "asc" : "desc");
-                }
-              }}
-              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
-                sortBy === key
-                  ? "bg-emerald-900/40 border-emerald-700/50 text-emerald-300"
-                  : "border-zinc-700/50 text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
-              }`}
-            >
-              {label}
-              {sortBy === key &&
-                (sortDirection === "asc" ? (
-                  <ArrowUp className="h-3 w-3" />
-                ) : (
-                  <ArrowDown className="h-3 w-3" />
-                ))}
-            </button>
-          ))}
+          {/* Search bar — takes all left space */}
+          <div className="relative flex items-center min-w-[42rem]">
+            <Search className="absolute left-3 h-4 w-4 text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search..."
+              className="w-full pl-10 pr-8 py-1.5 text-sm rounded-lg border border-zinc-700/50 bg-zinc-900 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-700/50 focus:ring-1 focus:ring-emerald-700/30"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2.5 text-gray-500 hover:text-gray-200 transition-colors"
+                tabIndex={-1}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Sort buttons — centered */}
+          <div className="flex items-center gap-2">
+            {(
+              [
+                { key: "name" as SortField, label: "Name" },
+                { key: "size" as SortField, label: "Size" },
+                { key: "uploadedAt" as SortField, label: "Date Added" },
+                { key: "daysLeft" as SortField, label: "Days Left" },
+              ] as const
+            ).map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => {
+                  if (sortBy === key) {
+                    setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+                  } else {
+                    setSortBy(key);
+                    setSortDirection(key === "name" ? "asc" : "desc");
+                  }
+                }}
+                className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
+                  sortBy === key
+                    ? "bg-emerald-900/40 border-emerald-700/50 text-emerald-300"
+                    : "border-zinc-700/50 text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
+                }`}
+              >
+                {label}
+                {sortBy === key &&
+                  (sortDirection === "asc" ? (
+                    <ArrowUp className="h-3 w-3" />
+                  ) : (
+                    <ArrowDown className="h-3 w-3" />
+                  ))}
+              </button>
+            ))}
+          </div>
+
+          {/* Right spacer to balance grid */}
+          <div />
         </div>
       )}
 
@@ -4259,6 +4348,7 @@ export default function FolderCardView({
       {/* Empty State - Show when no folders exist at root (only in 'all' view) */}
       {dataReady &&
         currentView === "all" &&
+        !searchQuery.trim() &&
         currentFolderId === null &&
         currentLevelFolders.length === 0 &&
         currentLevelFiles.length === 0 && (
@@ -4288,6 +4378,7 @@ export default function FolderCardView({
       {/* Show create folder prompt when files exist but no folders */}
       {dataReady &&
         currentView === "all" &&
+        !searchQuery.trim() &&
         currentFolderId === null &&
         currentLevelFolders.length === 0 &&
         currentLevelFiles.length > 0 && (
@@ -4562,6 +4653,7 @@ export default function FolderCardView({
       {/* Empty State for folder with no files (only in 'all' view) */}
       {dataReady &&
         currentView === "all" &&
+        !searchQuery.trim() &&
         currentFolderId !== null &&
         currentLevelFiles.length === 0 &&
         currentLevelFolders.length === 0 && (
@@ -4577,40 +4669,68 @@ export default function FolderCardView({
             </p>
           </div>
         )}
-      {/* Empty State for special views */}
-      {dataReady && currentView !== "all" && currentLevelFiles.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="empty-state-icon relative mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
-            {currentView === "recents" && (
-              <Clock className="h-12 w-12 text-emerald-400" />
-            )}
-            {currentView === "shared" && (
-              <Share2 className="h-12 w-12 text-emerald-400" />
-            )}
-            {currentView === "expiring" && (
-              <AlertCircle className="h-12 w-12 text-orange-600 dark:text-orange-400" />
-            )}
-            {currentView === "favorites" && (
-              <Star className="h-12 w-12 text-emerald-400" />
-            )}
+      {/* No search results */}
+      {dataReady &&
+        searchQuery.trim() &&
+        currentLevelFolders.length === 0 &&
+        currentLevelFiles.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="relative mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-zinc-800/60 to-zinc-900/60">
+              <Search className="h-12 w-12 text-gray-500" />
+            </div>
+            <h3 className="text-xl font-semibold text-white mb-2">
+              No results for &ldquo;{searchQuery}&rdquo;
+            </h3>
+            <p className="text-gray-400 max-w-md mb-4">
+              No files or folders match your search. Try a different name.
+            </p>
+            <button
+              onClick={() => setSearchQuery("")}
+              className="px-4 py-2 text-sm rounded-lg border border-zinc-700/50 text-gray-300 hover:bg-zinc-800 hover:text-white transition-colors"
+            >
+              Clear search
+            </button>
           </div>
-          <h3 className="text-xl font-semibold text-white mb-2">
-            {currentView === "recents" && "No recently uploaded files"}
-            {currentView === "shared" && "No shared files"}
-            {currentView === "expiring" && "No files expiring soon"}
-            {currentView === "favorites" && "No favorite files yet"}
-          </h3>
-          <p className="text-gray-300 max-w-md">
-            {currentView === "recents" && "Upload some files to see them here."}
-            {currentView === "shared" &&
-              "Share a file to see it here with its share link and expiry information."}
-            {currentView === "expiring" &&
-              "All your files have more than 10 days remaining."}
-            {currentView === "favorites" &&
-              "Mark your favorite files to find them here quickly"}
-          </p>
-        </div>
-      )}
+        )}
+
+      {/* Empty State for special views */}
+      {dataReady &&
+        currentView !== "all" &&
+        !searchQuery.trim() &&
+        currentLevelFiles.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="empty-state-icon relative mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
+              {currentView === "recents" && (
+                <Clock className="h-12 w-12 text-emerald-400" />
+              )}
+              {currentView === "shared" && (
+                <Share2 className="h-12 w-12 text-emerald-400" />
+              )}
+              {currentView === "expiring" && (
+                <AlertCircle className="h-12 w-12 text-orange-600 dark:text-orange-400" />
+              )}
+              {currentView === "favorites" && (
+                <Star className="h-12 w-12 text-emerald-400" />
+              )}
+            </div>
+            <h3 className="text-xl font-semibold text-white mb-2">
+              {currentView === "recents" && "No recently uploaded files"}
+              {currentView === "shared" && "No shared files"}
+              {currentView === "expiring" && "No files expiring soon"}
+              {currentView === "favorites" && "No favorite files yet"}
+            </h3>
+            <p className="text-gray-300 max-w-md">
+              {currentView === "recents" &&
+                "Upload some files to see them here."}
+              {currentView === "shared" &&
+                "Share a file to see it here with its share link and expiry information."}
+              {currentView === "expiring" &&
+                "All your files have more than 10 days remaining."}
+              {currentView === "favorites" &&
+                "Mark your favorite files to find them here quickly"}
+            </p>
+          </div>
+        )}
 
       {/* Files Display - Vertical list for consistency across all views */}
       {dataReady && currentLevelFiles.length > 0 && (

@@ -416,6 +416,14 @@ export default function FolderCardView({
   const [sortBy, setSortBy] = useState<SortField>("uploadedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Clear search when leaving the home/all view
+  useEffect(() => {
+    if (currentView !== "all") {
+      setSearchQuery("");
+    }
+  }, [currentView]);
+
   const daysPerEpoch = useDaysPerEpoch();
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
@@ -3182,7 +3190,7 @@ export default function FolderCardView({
           else fileCardRefs.current.delete(f.blobId);
         }}
         onClick={(e) => handleFileClick(f.blobId, e)}
-        className={`file-row group relative rounded-xl border p-4 shadow-sm w-full transition-transform duration-150 origin-center ${newFileIds.has(f.blobId) ? `stagger-${Math.min(fileIndex + 1, 10)}` : "no-animate"} ${
+        className={`file-row group relative rounded-xl border p-4 shadow-sm w-full transition-transform duration-150 origin-center ${openMenuId === f.blobId ? "menu-open" : ""} ${newFileIds.has(f.blobId) ? `stagger-${Math.min(fileIndex + 1, 10)}` : "no-animate"} ${
           isMoving ? "moving-out" : ""
         } ${
           isSelected
@@ -3860,10 +3868,11 @@ export default function FolderCardView({
                 {/* Backdrop to close menu and prevent clicks behind */}
                 <div
                   className="fixed inset-0 z-[100]"
-                  onClick={() => {
+                  onClick={(e) => {
                     // ignore the backdrop click if it's from the same event that
                     // opened the menu (prevents immediate close/flash)
                     if (ignoreBackdropClickRef.current) return;
+                    e.stopPropagation();
                     setOpenMenuId(null);
                     setFileMenuPosition(null);
                     setFileMenuAnchorRect(null);
@@ -4122,77 +4131,78 @@ export default function FolderCardView({
         </div>
       )}
 
-      {/* Sort Toolbar */}
-      {(currentLevelFiles.length > 0 ||
-        currentLevelFolders.length > 0 ||
-        currentFolderId !== null ||
-        searchQuery.trim() !== "") && (
-        <div
-          className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 w-full"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          {/* Search bar — takes all left space */}
-          <div className="relative flex items-center min-w-[42rem]">
-            <Search className="absolute left-3 h-4 w-4 text-gray-400 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search..."
-              className="w-full pl-10 pr-8 py-1.5 text-sm rounded-lg border border-zinc-700/50 bg-zinc-900 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-700/50 focus:ring-1 focus:ring-emerald-700/30"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="absolute right-2.5 text-gray-500 hover:text-gray-200 transition-colors"
-                tabIndex={-1}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
+      {/* Sort Toolbar — only shown on home/all view */}
+      {currentView === "all" &&
+        (currentLevelFiles.length > 0 ||
+          currentLevelFolders.length > 0 ||
+          currentFolderId !== null ||
+          searchQuery.trim() !== "") && (
+          <div
+            className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 w-full"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            {/* Search bar — takes all left space */}
+            <div className="relative flex items-center min-w-[42rem]">
+              <Search className="absolute left-3 h-4 w-4 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search..."
+                className="w-full pl-10 pr-8 py-1.5 text-sm rounded-lg border border-zinc-700/50 bg-zinc-900 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-700/50 focus:ring-1 focus:ring-emerald-700/30"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 text-gray-500 hover:text-gray-200 transition-colors"
+                  tabIndex={-1}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
 
-          {/* Sort buttons — centered */}
-          <div className="flex items-center gap-2">
-            {(
-              [
-                { key: "name" as SortField, label: "Name" },
-                { key: "size" as SortField, label: "Size" },
-                { key: "uploadedAt" as SortField, label: "Date Added" },
-                { key: "daysLeft" as SortField, label: "Days Left" },
-              ] as const
-            ).map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => {
-                  if (sortBy === key) {
-                    setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
-                  } else {
-                    setSortBy(key);
-                    setSortDirection(key === "name" ? "asc" : "desc");
-                  }
-                }}
-                className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
-                  sortBy === key
-                    ? "bg-emerald-900/40 border-emerald-700/50 text-emerald-300"
-                    : "border-zinc-700/50 text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
-                }`}
-              >
-                {label}
-                {sortBy === key &&
-                  (sortDirection === "asc" ? (
-                    <ArrowUp className="h-3 w-3" />
-                  ) : (
-                    <ArrowDown className="h-3 w-3" />
-                  ))}
-              </button>
-            ))}
-          </div>
+            {/* Sort buttons — centered */}
+            <div className="flex items-center gap-2">
+              {(
+                [
+                  { key: "name" as SortField, label: "Name" },
+                  { key: "size" as SortField, label: "Size" },
+                  { key: "uploadedAt" as SortField, label: "Date Added" },
+                  { key: "daysLeft" as SortField, label: "Days Left" },
+                ] as const
+              ).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    if (sortBy === key) {
+                      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+                    } else {
+                      setSortBy(key);
+                      setSortDirection(key === "name" ? "asc" : "desc");
+                    }
+                  }}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
+                    sortBy === key
+                      ? "bg-emerald-900/40 border-emerald-700/50 text-emerald-300"
+                      : "border-zinc-700/50 text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
+                  }`}
+                >
+                  {label}
+                  {sortBy === key &&
+                    (sortDirection === "asc" ? (
+                      <ArrowUp className="h-3 w-3" />
+                    ) : (
+                      <ArrowDown className="h-3 w-3" />
+                    ))}
+                </button>
+              ))}
+            </div>
 
-          {/* Right spacer to balance grid */}
-          <div />
-        </div>
-      )}
+            {/* Right spacer to balance grid */}
+            <div />
+          </div>
+        )}
 
       {/* Breadcrumb Navigation - only show for folder views */}
       {currentView === "all" && currentFolderId !== null && (
@@ -4353,23 +4363,19 @@ export default function FolderCardView({
         currentLevelFolders.length === 0 &&
         currentLevelFiles.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 w-full max-w-6xl">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full">
               {/* Professional service-style create folder button */}
               <button
                 onClick={() => {
                   setCreateFolderParentId(null);
                   setCreateFolderDialogOpen(true);
                 }}
-                className="group relative rounded-xl border-2 border-emerald-800/50 bg-emerald-950/30 p-4 shadow-sm transition-all duration-200 hover:border-emerald-700/60 hover:bg-emerald-900/20"
+                className="group relative flex items-center gap-3 rounded-xl border border-emerald-800/50 bg-emerald-950/30 p-4 shadow-sm transition-all duration-200 hover:border-emerald-700/60 hover:bg-emerald-900/20"
               >
-                <div className="flex flex-col items-center text-center">
-                  <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
-                    <FolderPlus className="h-10 w-10 text-emerald-400" />
-                  </div>
-                  <p className="font-medium text-gray-100 truncate w-full text-[15px]">
-                    Create New Folder
-                  </p>
-                </div>
+                <FolderPlus className="h-7 w-7 flex-shrink-0 text-emerald-400" />
+                <p className="font-medium text-gray-100 truncate text-base">
+                  Create New Folder
+                </p>
               </button>
             </div>
           </div>
@@ -4383,23 +4389,18 @@ export default function FolderCardView({
         currentLevelFolders.length === 0 &&
         currentLevelFiles.length > 0 && (
           <div className="mb-6">
-            <h3 className="text-sm font-medium text-gray-300 mb-3">Folders</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <button
                 onClick={() => {
                   setCreateFolderParentId(null);
                   setCreateFolderDialogOpen(true);
                 }}
-                className="group relative rounded-xl border-2 border-emerald-800/50 bg-emerald-950/30 p-4 shadow-sm transition-all duration-200 hover:border-emerald-700/60 hover:bg-emerald-900/20"
+                className="group relative flex items-center gap-3 rounded-xl border border-emerald-800/50 bg-emerald-950/30 p-4 shadow-sm transition-all duration-200 hover:border-emerald-700/60 hover:bg-emerald-900/20"
               >
-                <div className="flex flex-col items-center text-center">
-                  <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
-                    <FolderPlus className="h-10 w-10 text-emerald-400" />
-                  </div>
-                  <p className="font-medium text-gray-100 truncate w-full text-[15px]">
-                    Create New Folder
-                  </p>
-                </div>
+                <FolderPlus className="h-7 w-7 flex-shrink-0 text-emerald-400" />
+                <p className="font-medium text-gray-100 truncate text-base">
+                  Create New Folder
+                </p>
               </button>
             </div>
           </div>
@@ -4408,6 +4409,8 @@ export default function FolderCardView({
       {/* Folders Grid - Show ONLY in 'all' view when at root or in a folder with subfolders */}
       {dataReady && currentView === "all" && currentLevelFolders.length > 0 && (
         <div
+          className="mb-4"
+          style={{ marginBottom: "24px" }}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -4419,10 +4422,7 @@ export default function FolderCardView({
         >
           {/* Small spacer for drag selection start area */}
           <div className="h-2" onMouseDown={handleMouseDown} />
-          {currentFolderId === null && (
-            <h3 className="text-sm font-medium text-gray-300 mb-3">Folders</h3>
-          )}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {currentLevelFolders.map((folder, index) => {
               const isSelected = selectedFolderIds.has(folder.id);
               return (
@@ -4432,7 +4432,7 @@ export default function FolderCardView({
                     if (el) folderCardRefs.current.set(folder.id, el);
                     else folderCardRefs.current.delete(folder.id);
                   }}
-                  className={`folder-card group relative rounded-xl border-2 ${
+                  className={`folder-card group relative rounded-xl border ${
                     isSelected
                       ? "border-emerald-400/70 bg-emerald-900/50"
                       : dragOverFolderId === folder.id
@@ -4442,7 +4442,7 @@ export default function FolderCardView({
                     newFolderIds.has(folder.id)
                       ? `stagger-${Math.min(index + 1, 10)}`
                       : "no-animate"
-                  } ${draggedFile ? "dragging" : ""}`}
+                  } ${openFolderMenuId === folder.id ? "menu-open" : ""} ${draggedFile ? "dragging" : ""}`}
                   draggable={currentView === "all"}
                   onDragStart={(e) => handleFolderDragStart(folder, e)}
                   onDragEnd={handleFolderDragEnd}
@@ -4473,16 +4473,17 @@ export default function FolderCardView({
                     });
                   }}
                 >
-                  <div className="flex flex-col items-center text-center">
-                    <div className="folder-icon-wrapper mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
-                      <Folder
-                        className="h-10 w-10 transition-all duration-300"
-                        style={{ color: folder.color || "#10b981" }}
-                      />
-                    </div>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Folder
+                      className="h-7 w-7 flex-shrink-0 transition-all duration-300"
+                      style={{
+                        color: folder.color || "#10b981",
+                        fill: folder.color || "#10b981",
+                      }}
+                    />
 
                     {editingFolderId === folder.id ? (
-                      <div className="flex items-center gap-1 w-full">
+                      <div className="flex items-center gap-1 flex-1 min-w-0">
                         <input
                           type="text"
                           value={editingFolderName}
@@ -4495,7 +4496,7 @@ export default function FolderCardView({
                               setEditingFolderName("");
                             }
                           }}
-                          className="flex-1 min-w-0 bg-transparent border-b border-emerald-400 outline-none text-[15px] text-center text-gray-100"
+                          className="flex-1 min-w-0 bg-transparent border-b border-emerald-400 outline-none text-[15px] text-gray-100"
                           autoFocus
                           onClick={(e) => e.stopPropagation()}
                         />
@@ -4522,13 +4523,13 @@ export default function FolderCardView({
                         </button>
                       </div>
                     ) : (
-                      <p className="font-medium text-gray-100 truncate w-full text-[15px]">
+                      <p className="font-medium text-gray-100 truncate flex-1 min-w-0 text-base">
                         {folder.name}
                       </p>
                     )}
                   </div>
 
-                  {/* Folder menu button */}
+                  {/* Folder menu button - always visible */}
                   <button
                     ref={(el) => {
                       if (el) folderButtonRefs.current.set(folder.id, el);
@@ -4557,7 +4558,7 @@ export default function FolderCardView({
                         setOpenFolderMenuId(folder.id);
                       }
                     }}
-                    className="absolute top-2 right-2 p-1.5 opacity-0 group-hover:opacity-100 hover:bg-zinc-800 rounded-lg transition-all z-10"
+                    className="absolute top-1/2 right-2 -translate-y-1/2 p-1.5 hover:bg-zinc-800 rounded-lg transition-all z-10"
                   >
                     <MoreVertical className="h-4 w-4 text-gray-400" />
                   </button>
@@ -4571,7 +4572,8 @@ export default function FolderCardView({
                         {/* Backdrop to close menu */}
                         <div
                           className="fixed inset-0 z-[9998]"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setOpenFolderMenuId(null);
                             setFolderMenuPosition(null);
                           }}
@@ -4735,10 +4737,6 @@ export default function FolderCardView({
       {/* Files Display - Vertical list for consistency across all views */}
       {dataReady && currentLevelFiles.length > 0 && (
         <div className="w-full">
-          {currentView === "all" && (
-            <h3 className="text-sm font-medium text-gray-300 mb-3">Files</h3>
-          )}
-
           {currentView === "shared" ? (
             <div className="space-y-6">
               <div>

@@ -74,23 +74,35 @@ export function Payment() {
               window.dispatchEvent(new Event("balance-updated"));
               window.dispatchEvent(new Event("transactions:updated"));
 
-              // Check if user was redirected from shared save or upload due to insufficient funds
-              if (sessionStorage.getItem("pendingSharedSave")) {
-                // Navigate back to shared view; FolderCardView will resume the save
+              // Check redirect-after-payment context from URL params first
+              // (sessionStorage may not survive the external Stripe redirect)
+              const redirectAfter = params.get("redirect_after");
+              if (
+                redirectAfter === "shared" ||
+                sessionStorage.getItem("pendingSharedSave")
+              ) {
                 navigate("/home?view=shared");
-              } else if (sessionStorage.getItem("openUploadAfterPayment")) {
-                const uploadType = sessionStorage.getItem("openUploadAfterPayment");
+              } else if (
+                redirectAfter?.startsWith("upload:") ||
+                sessionStorage.getItem("openUploadAfterPayment")
+              ) {
+                const uploadType = redirectAfter?.startsWith("upload:")
+                  ? redirectAfter.split(":")[1]
+                  : sessionStorage.getItem("openUploadAfterPayment");
                 sessionStorage.removeItem("openUploadAfterPayment");
-                navigate("/home", { state: { openUploadDialog: true, uploadType } });
+                navigate("/home", {
+                  state: { openUploadDialog: true, uploadType },
+                });
               }
             }
           } catch (err) {
             console.error("Failed to verify stripe session", err);
           } finally {
-            // remove session_id from URL so we don't re-run verification on reload
+            // remove session_id and redirect_after from URL so we don't re-run verification on reload
             try {
               const url = new URL(window.location.href);
               url.searchParams.delete("session_id");
+              url.searchParams.delete("redirect_after");
               window.history.replaceState({}, document.title, url.toString());
             } catch (_) {}
           }
@@ -105,7 +117,10 @@ export function Payment() {
     window.addEventListener("transactions:updated", handleTransactionUpdate);
     return () => {
       clearInterval(interval);
-      window.removeEventListener("transactions:updated", handleTransactionUpdate);
+      window.removeEventListener(
+        "transactions:updated",
+        handleTransactionUpdate,
+      );
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -114,14 +129,15 @@ export function Payment() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (!target.closest('.balance-add-dropdown')) {
+      if (!target.closest(".balance-add-dropdown")) {
         setAddDropdownOpen(false);
       }
     };
 
     if (addDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
+      document.addEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
     }
   }, [addDropdownOpen]);
 
@@ -173,7 +189,10 @@ export function Payment() {
         const transactions = txData.transactions || [];
         const spent = transactions
           .filter((t: { amount: number }) => t.amount < 0)
-          .reduce((sum: number, t: { amount: number }) => sum + Math.abs(t.amount), 0);
+          .reduce(
+            (sum: number, t: { amount: number }) => sum + Math.abs(t.amount),
+            0,
+          );
         setTotalSpent(spent);
         const added = transactions
           .filter((t: { amount: number }) => t.amount > 0)
@@ -216,7 +235,9 @@ export function Payment() {
           } else if (sessionStorage.getItem("openUploadAfterPayment")) {
             const uploadType = sessionStorage.getItem("openUploadAfterPayment");
             sessionStorage.removeItem("openUploadAfterPayment");
-            navigate("/home", { state: { openUploadDialog: true, uploadType } });
+            navigate("/home", {
+              state: { openUploadDialog: true, uploadType },
+            });
           }
         } else {
           setMessage({
@@ -242,13 +263,22 @@ export function Payment() {
     setLoading(true);
     setMessage(null);
 
+    // Determine redirect-after-payment context to pass through the Stripe URL
+    // (sessionStorage may not survive the external Stripe redirect in all browsers)
+    let redirectAfter: string | undefined;
+    if (sessionStorage.getItem("pendingSharedSave")) {
+      redirectAfter = "shared";
+    } else if (sessionStorage.getItem("openUploadAfterPayment")) {
+      redirectAfter = `upload:${sessionStorage.getItem("openUploadAfterPayment")}`;
+    }
+
     try {
       const response = await fetch(
         apiUrl("/api/stripe_payment/create-session"),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: user.id, priceId }),
+          body: JSON.stringify({ userId: user.id, priceId, redirectAfter }),
         },
       );
 
@@ -357,7 +387,9 @@ export function Payment() {
                   </div>
                 ) : suiPrice !== null ? (
                   <div className="exchange-content">
-                    <div className="exchange-price">1 SUI = ${suiPrice.toFixed(2)}</div>
+                    <div className="exchange-price">
+                      1 SUI = ${suiPrice.toFixed(2)}
+                    </div>
                   </div>
                 ) : (
                   <div className="exchange-error">Failed to load price</div>

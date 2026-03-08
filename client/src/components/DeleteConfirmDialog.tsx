@@ -67,7 +67,6 @@ export function DeleteConfirmDialog({
             onClick={handleConfirm}
             className="bg-[#E5484D] hover:bg-[#E5484D]/90 text-white"
           >
-            <Trash2 className="mr-2 h-4 w-4" />
             {confirmLabel}
           </Button>
         </DialogFooter>

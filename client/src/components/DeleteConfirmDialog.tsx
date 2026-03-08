@@ -54,18 +54,18 @@ export function DeleteConfirmDialog({
           </div>
         </div>
 
-        <DialogFooter className="flex gap-2 sm:gap-2">
+        <DialogFooter className="flex w-full gap-2 sm:gap-2">
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
-            className="bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-200"
+            className="flex-1 bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-200"
           >
             Cancel
           </Button>
           <Button
             variant="destructive"
             onClick={handleConfirm}
-            className="bg-[#E5484D] hover:bg-[#E5484D]/90 text-white"
+            className="flex-1 bg-[#E5484D] hover:bg-[#E5484D]/90 text-white"
           >
             {confirmLabel}
           </Button>

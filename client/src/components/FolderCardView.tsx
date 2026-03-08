@@ -378,6 +378,13 @@ export default function FolderCardView({
   } | null>(null);
   const contentMenuRef = useRef<HTMLDivElement | null>(null);
 
+  // Selection right-click context menu state
+  const [selectionMenuPosition, setSelectionMenuPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const selectionMenuRef = useRef<HTMLDivElement | null>(null);
+
   useLayoutEffect(() => {
     if (!contentMenuPosition || !contentMenuRef.current) return;
     const menuRect = contentMenuRef.current.getBoundingClientRect();
@@ -401,6 +408,28 @@ export default function FolderCardView({
       return { top, left };
     });
   }, [contentMenuPosition]);
+
+  useLayoutEffect(() => {
+    if (!selectionMenuPosition || !selectionMenuRef.current) return;
+    const menuRect = selectionMenuRef.current.getBoundingClientRect();
+    const margin = 8;
+    let top = selectionMenuPosition.top;
+    let left = selectionMenuPosition.left;
+
+    if (top + menuRect.height > window.innerHeight - margin) {
+      top = window.innerHeight - menuRect.height - margin;
+    }
+    if (left + menuRect.width > window.innerWidth - margin) {
+      left = window.innerWidth - menuRect.width - margin;
+    }
+    top = Math.max(margin, top);
+    left = Math.max(margin, left);
+
+    setSelectionMenuPosition((prev) => {
+      if (prev && prev.top === top && prev.left === left) return prev;
+      return { top, left };
+    });
+  }, [selectionMenuPosition]);
 
   // Multi-select state
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(
@@ -3341,12 +3370,21 @@ export default function FolderCardView({
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          setOpenMenuId(f.blobId);
-          setFileMenuAnchorRect(new DOMRect(e.clientX, e.clientY, 0, 0));
-          setFileMenuPosition({
-            top: e.clientY + 4,
-            left: e.clientX + 4,
-          });
+          const isFileSelected = selectedFileIds.has(f.blobId);
+          const totalSelected = selectedFileIds.size + selectedFolderIds.size;
+          if (isFileSelected && totalSelected > 1) {
+            setSelectionMenuPosition({
+              top: e.clientY + 4,
+              left: e.clientX + 4,
+            });
+          } else {
+            setOpenMenuId(f.blobId);
+            setFileMenuAnchorRect(new DOMRect(e.clientX, e.clientY, 0, 0));
+            setFileMenuPosition({
+              top: e.clientY + 4,
+              left: e.clientX + 4,
+            });
+          }
         }}
       >
         <div className="flex items-start gap-3 w-full">
@@ -4489,11 +4527,21 @@ export default function FolderCardView({
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    setOpenFolderMenuId(folder.id);
-                    setFolderMenuPosition({
-                      top: e.clientY + 4,
-                      left: e.clientX + 4,
-                    });
+                    const isFolderSelected = selectedFolderIds.has(folder.id);
+                    const totalSelected =
+                      selectedFileIds.size + selectedFolderIds.size;
+                    if (isFolderSelected && totalSelected > 1) {
+                      setSelectionMenuPosition({
+                        top: e.clientY + 4,
+                        left: e.clientX + 4,
+                      });
+                    } else {
+                      setOpenFolderMenuId(folder.id);
+                      setFolderMenuPosition({
+                        top: e.clientY + 4,
+                        left: e.clientX + 4,
+                      });
+                    }
                   }}
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -5092,6 +5140,57 @@ export default function FolderCardView({
               >
                 <FolderUp className="h-4 w-4" />
                 Folder Upload
+              </button>
+            </div>
+          </>,
+          document.body,
+        )}
+
+      {/* Selection Context Menu - Right-click on selected files/folders */}
+      {selectionMenuPosition &&
+        typeof window !== "undefined" &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[110]"
+              onClick={() => setSelectionMenuPosition(null)}
+            />
+            <div
+              ref={selectionMenuRef}
+              className="fixed z-[111] bg-zinc-900 rounded-lg shadow-lg border border-zinc-800 py-1 min-w-[160px]"
+              style={{
+                top: `${selectionMenuPosition.top}px`,
+                left: `${selectionMenuPosition.left}px`,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-zinc-800">
+                {selectedFileIds.size + selectedFolderIds.size} selected
+              </div>
+              <button
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-zinc-800 text-white text-left"
+                disabled={bulkDownloading}
+                onClick={() => {
+                  setSelectionMenuPosition(null);
+                  bulkDownloadFoldersAndFiles();
+                }}
+              >
+                {bulkDownloading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                {bulkDownloading ? "Downloading..." : "Download"}
+              </button>
+              <button
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-zinc-800 text-red-400 text-left"
+                onClick={() => {
+                  setSelectionMenuPosition(null);
+                  promptBulkDelete();
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
               </button>
             </div>
           </>,

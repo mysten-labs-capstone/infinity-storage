@@ -34,7 +34,7 @@ export function InsufficientFundsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-white">
             Insufficient Funds
@@ -44,18 +44,21 @@ export function InsufficientFundsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <DialogFooter>
+        <div className="space-y-2 text-sm"></div>
+
+        <DialogFooter className="flex gap-3">
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
-            className="border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-white"
+            className="flex-1 border-slate-700 bg-slate-800/50 hover:bg-slate-700/50 text-white h-11"
           >
             Cancel
           </Button>
           <Button
             onClick={handleAddFunds}
-            className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700"
+            className="flex-1 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 text-white font-semibold shadow-lg shadow-emerald-500/25 h-11 transition-all"
           >
+            {" "}
             Add Funds
           </Button>
         </DialogFooter>

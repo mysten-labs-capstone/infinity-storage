@@ -117,9 +117,13 @@ function calculateRetryDelay(retryCount: number): number {
   return delay;
 }
 
+// Module-level lock shared across all hook instances to prevent
+// concurrent processQueue invocations (multiple components use
+// useUploadQueue simultaneously).
+let globalBusy = false;
+
 export function useUploadQueue() {
   const [items, setItems] = useState<QueuedUpload[]>([]);
-  const busyRef = useRef(false);
   const hasInitializedRef = useRef(false);
   const { privateKey } = useAuth();
 
@@ -422,6 +426,11 @@ export function useUploadQueue() {
       const blob = await loadBlob(userId, id);
       if (!meta || !blob) throw new Error("missing data");
 
+      // Guard: skip if another hook instance already started uploading this file
+      if (meta.status === "uploading") {
+        return false;
+      }
+
       try {
         if (meta.status === "error") {
           meta.retryCount = 0;
@@ -723,9 +732,8 @@ export function useUploadQueue() {
   // Server's trigger-pending handles Walrus uploads (6 concurrent, max 2 per user).
   // ================================================================
   const processQueue = useCallback(async () => {
-    // ...existing code...
-    if (busyRef.current || !userId) return;
-    busyRef.current = true;
+    if (globalBusy || !userId) return;
+    globalBusy = true;
 
     try {
       const ids = await readList(userId);
@@ -782,7 +790,7 @@ export function useUploadQueue() {
         }
       }
     } finally {
-      busyRef.current = false;
+      globalBusy = false;
       window.dispatchEvent(new Event("upload-queue-updated"));
       await refresh();
     }

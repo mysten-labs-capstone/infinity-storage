@@ -80,12 +80,14 @@ export async function GET(
       );
     }
 
-    // Check if share is expired
+    // Links are now treated as non-expiring for easier sharing UX.
+    // If a legacy share has an old expiresAt, clear it lazily here.
     if (share.expiresAt && new Date(share.expiresAt) < new Date()) {
-      return NextResponse.json(
-        { error: "This share link has expired", expired: true },
-        { status: 403, headers: withCORS(req) }
-      );
+      await prisma.share.update({
+        where: { id: shareId },
+        data: { expiresAt: null },
+      });
+      share.expiresAt = null;
     }
 
     // Check download limit

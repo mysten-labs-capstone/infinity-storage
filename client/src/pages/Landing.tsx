@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import { authService } from "../services/authService";
+import { apiUrl } from "../config/api";
 import "./css/Landing.css";
 
 // ============================================
@@ -1695,9 +1698,12 @@ const CTACard: React.FC = () => {
 };
 
 export const Landing: React.FC = () => {
+  const navigate = useNavigate();
+  const { setPrivateKey } = useAuth();
   const [showIntro, setShowIntro] = useState(true);
   const [scrollY, setScrollY] = useState(0);
   const [navVisible, setNavVisible] = useState(true);
+  const [startingDemo, setStartingDemo] = useState(false);
   const lastScrollY = useRef(0);
 
   useEffect(() => {
@@ -1746,6 +1752,31 @@ export const Landing: React.FC = () => {
     setShowIntro(true);
     window.scrollTo(0, 0);
   };
+
+  const handleStartDemo = useCallback(async () => {
+    if (startingDemo) return;
+    setStartingDemo(true);
+    try {
+      const response = await fetch(apiUrl("/api/auth/demo"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data?.user || !data?.privateKey) {
+        throw new Error(data?.error || "Could not start demo");
+      }
+
+      authService.saveUser(data.user);
+      setPrivateKey(data.privateKey);
+      navigate("/home");
+    } catch (err) {
+      console.error("Failed to start demo:", err);
+      alert("Could not start demo right now. Please try again in a moment.");
+    } finally {
+      setStartingDemo(false);
+    }
+  }, [navigate, setPrivateKey, startingDemo]);
 
   return (
     <div className="landing-page">
@@ -1815,15 +1846,16 @@ export const Landing: React.FC = () => {
                 independent storage nodes. Not even we can decrypt your data.
               </p>
               <div className="hero-buttons">
-                <Link to="/join" className="btn-primary">
+                <Link to="/join" className="btn-primary start-storing-btn">
                   <span>Start Storing </span>
                   <span className="btn-arrow">→</span>
                 </Link>
                 <button
-                  onClick={() => scrollToSection("features")}
+                  onClick={handleStartDemo}
                   className="btn-secondary"
+                  disabled={startingDemo}
                 >
-                  <span>Learn More</span>
+                  <span>{startingDemo ? "Starting Demo..." : "Try Demo"}</span>
                 </button>
               </div>
               <div className="hero-trust">

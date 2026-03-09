@@ -532,7 +532,7 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 8rem 2rem 4rem;
+  padding: 9.5rem 2rem 4rem;
   position: relative;
   z-index: 1;
 }
@@ -2732,6 +2732,53 @@
 /* Smooth Scroll */
 html {
   scroll-behavior: smooth;
+}
+
+/* Keep primary CTAs visible on first mobile viewport without scrolling. */
+@media (max-width: 768px) {
+  .start-storing-btn {
+    display: none;
+  }
+
+  .hero-section {
+    min-height: auto;
+    padding: 6.5rem 1rem 2rem;
+  }
+
+  .hero-content {
+    gap: 1rem;
+  }
+
+  .hero-text {
+    order: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .hero-title {
+    margin-bottom: 1rem;
+  }
+
+  .hero-text .hero-buttons {
+    order: 2;
+    margin-bottom: 1rem;
+  }
+
+  .hero-text .hero-description {
+    order: 3;
+    font-size: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .hero-text .hero-trust {
+    order: 4;
+  }
+
+  .hero-visual {
+    order: 2;
+    max-width: 240px;
+    margin: 0.5rem auto 0;
+  }
 }
 
 /* Selection Color */

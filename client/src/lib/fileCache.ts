@@ -6,6 +6,7 @@ export interface CachedFile {
   type: string;
   encrypted: boolean;
   uploadedAt: string;
+  expiresAt?: string | null;
   epochs?: number; // Storage duration in epochs (default: 3)
   status?: "pending" | "processing" | "completed" | "failed";
   s3Key?: string | null;

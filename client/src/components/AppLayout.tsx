@@ -114,9 +114,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("username");
-    navigate("/login");
+    authService.logout();
+    navigate("/", { replace: true });
   };
 
   return (

@@ -87,6 +87,7 @@ export type FileItem = {
   type: string;
   encrypted: boolean;
   uploadedAt: string;
+  expiresAt?: string | null;
   epochs?: number;
   status?: "pending" | "processing" | "completed" | "failed";
   s3Key?: string | null;
@@ -4916,6 +4917,7 @@ export default function FolderCardView({
           filename={shareFile.filename}
           encrypted={shareFile.encrypted}
           uploadedAt={shareFile.uploadedAt}
+          expiresAt={shareFile.expiresAt}
           epochs={shareFile.epochs}
           onShareCreated={() => {
             onSharedFilesRefresh?.();

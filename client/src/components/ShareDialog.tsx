@@ -32,6 +32,7 @@ type ShareDialogProps = {
   filename: string;
   encrypted: boolean;
   uploadedAt?: string;
+  expiresAt?: string | null;
   epochs?: number;
   onShareCreated?: () => void;
 };
@@ -43,6 +44,7 @@ export function ShareDialog({
   filename,
   encrypted,
   uploadedAt,
+  expiresAt,
   epochs,
   onShareCreated,
 }: ShareDialogProps) {
@@ -56,15 +58,25 @@ export function ShareDialog({
   // QR is always shown after creating a share; default payload is key-only for safety
 
   // Share options
-  const [expiresInDays, setExpiresInDays] = useState<number | "">(1);
+  const [expiresInDays, setExpiresInDays] = useState<number | "">("");
   const [tempDays, setTempDays] = useState<string>("1");
   const daysPerEpoch = useDaysPerEpoch();
 
   // Compute remaining lifetime for the file (days). Epochs are network-dependent.
   const calculateExpiryInfo = (
     uploadedAt: string | undefined,
+    explicitExpiresAt: string | null | undefined,
     epochs: number | undefined,
   ) => {
+    if (explicitExpiresAt) {
+      const expiryDate = new Date(explicitExpiresAt);
+      const now = new Date();
+      const daysRemaining = Math.ceil(
+        (expiryDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000),
+      );
+      return { expiryDate, daysRemaining: Math.max(0, daysRemaining) };
+    }
+
     if (!uploadedAt)
       return { expiryDate: null as Date | null, daysRemaining: Infinity };
     const uploadDate = new Date(uploadedAt);
@@ -79,7 +91,7 @@ export function ShareDialog({
     return { expiryDate, daysRemaining: Math.max(0, daysRemaining) };
   };
 
-  const { daysRemaining } = calculateExpiryInfo(uploadedAt, epochs);
+  const { daysRemaining } = calculateExpiryInfo(uploadedAt, expiresAt, epochs);
 
   // Sync tempDays when dialog opens or state changes
   useEffect(() => {
@@ -114,10 +126,10 @@ export function ShareDialog({
       }
 
       // Create share record on server (NO KEY SENT)
-      const daysToExpire = expiresInDays || 1;
       if (
+        expiresInDays !== "" &&
         Number.isFinite(daysRemaining) &&
-        Number(daysToExpire) > daysRemaining
+        Number(expiresInDays) > daysRemaining
       ) {
         setError(
           `Expiration cannot exceed file lifetime (${daysRemaining} days)`,
@@ -125,9 +137,12 @@ export function ShareDialog({
         setLoading(false);
         return;
       }
-      const expiresAt = new Date(
-        Date.now() + Number(daysToExpire) * 24 * 60 * 60 * 1000,
-      ).toISOString();
+      const expiresAt =
+        expiresInDays === ""
+          ? null
+          : new Date(
+              Date.now() + Number(expiresInDays) * 24 * 60 * 60 * 1000,
+            ).toISOString();
 
       const response = await fetch(apiUrl("/api/shares"), {
         method: "POST",
@@ -165,6 +180,11 @@ export function ShareDialog({
           filename,
           user?.id,
         );
+        if (!(blobResponse instanceof Response)) {
+          throw new Error(
+            "Could not prepare encrypted share key from presigned download",
+          );
+        }
         if (!blobResponse.ok) {
           throw new Error("Failed to download blob for key derivation");
         }
@@ -265,7 +285,7 @@ export function ShareDialog({
     setShareLink("");
     setError("");
     setCopied(false);
-    setExpiresInDays(1);
+    setExpiresInDays("");
     setTempDays("1");
     onClose();
   };
@@ -526,10 +546,7 @@ export function ShareDialog({
                     <LinkIcon className="h-4 w-4 text-emerald-400" />
                     Share Link
                   </label>
-                  <span className="text-xs text-gray-400">
-                    Expires in {expiresInDays || 1} day
-                    {(expiresInDays || 1) !== 1 ? "s" : ""}
-                  </span>
+                  <span className="text-xs text-gray-400">Does not expire</span>
                 </div>
                 <div className="flex gap-2">
                   <Input

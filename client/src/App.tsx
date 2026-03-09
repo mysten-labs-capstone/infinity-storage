@@ -69,6 +69,7 @@ export default function App() {
   const [epochs, setEpochs] = useState(3); // Default: 3 epochs = 90 days
   const daysPerEpoch = useDaysPerEpoch();
   const user = authService.getCurrentUser();
+  const isDemoAccount = user?.username?.startsWith("demo_") ?? false;
 
   // Folder system state
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -487,6 +488,7 @@ export default function App() {
           type: f.contentType || "application/octet-stream",
           encrypted: f.encrypted,
           uploadedAt: f.uploadedAt,
+          expiresAt: f.expiresAt || null,
           epochs: f.epochs || 3,
           status: f.status,
           s3Key: f.s3Key,
@@ -718,11 +720,12 @@ export default function App() {
   // Convert CachedFile to FileItem format for FolderCardView
   const fileItems = useMemo(() => {
     let filtered = uploadedFiles.filter((f) => {
-      const uploadDate = new Date(f.uploadedAt);
-      const totalDays = (f.epochs || 3) * daysPerEpoch;
-      const expiryDate = new Date(
-        uploadDate.getTime() + totalDays * 24 * 60 * 60 * 1000,
-      );
+      const expiryDate = f.expiresAt
+        ? new Date(f.expiresAt)
+        : new Date(
+            new Date(f.uploadedAt).getTime() +
+              (f.epochs || 3) * daysPerEpoch * 24 * 60 * 60 * 1000,
+          );
       return expiryDate.getTime() > Date.now();
     });
 
@@ -742,11 +745,12 @@ export default function App() {
       // Files with 10 days or less remaining, sorted by closest to expiring first.
       // Use the dynamic daysPerEpoch value so this matches the network config.
       const calcDaysRemaining = (f: CachedFile) => {
-        const uploadDate = new Date(f.uploadedAt);
-        const totalDays = (f.epochs || 3) * daysPerEpoch;
-        const expiryDate = new Date(
-          uploadDate.getTime() + totalDays * 24 * 60 * 60 * 1000,
-        );
+        const expiryDate = f.expiresAt
+          ? new Date(f.expiresAt)
+          : new Date(
+              new Date(f.uploadedAt).getTime() +
+                (f.epochs || 3) * daysPerEpoch * 24 * 60 * 60 * 1000,
+            );
         const now = new Date();
         return Math.ceil(
           (expiryDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000),
@@ -793,6 +797,7 @@ export default function App() {
       type: f.type,
       encrypted: f.encrypted,
       uploadedAt: f.uploadedAt,
+      expiresAt: f.expiresAt || null,
       epochs: f.epochs,
       status: f.status,
       folderId: f.folderId || null,
@@ -1674,6 +1679,23 @@ export default function App() {
             }
           }}
         >
+          {isDemoAccount && (
+            <div className="mb-4 sm:mb-5 rounded-xl border border-amber-400/70 bg-amber-400/10 px-4 py-3 sm:px-5 sm:py-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-300 mt-0.5" />
+                <div>
+                  <p className="text-sm sm:text-base font-extrabold tracking-wide uppercase text-amber-200">
+                    Demo Account Only
+                  </p>
+                  <p className="mt-1 text-sm sm:text-base text-zinc-100 font-medium">
+                    Files in this session are for demonstration only and are not
+                    permanently saved.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Sidebar toggle button when sidebar is hidden - REMOVED, now in mini sidebar */}
 
           {/* Unified Folder/File View */}

@@ -108,6 +108,41 @@ export async function POST(req: Request) {
       );
     }
 
+    if (blobId.startsWith("demo_")) {
+      await prisma.$transaction(async (tx) => {
+        const fileToDelete = await tx.file.findUnique({
+          where: { blobId },
+          select: { id: true },
+        });
+
+        if (fileToDelete) {
+          const shares = await tx.share.findMany({
+            where: { fileId: fileToDelete.id },
+            select: { id: true },
+          });
+          const shareIds = shares.map((s) => s.id);
+
+          if (shareIds.length > 0) {
+            await tx.savedShare.deleteMany({
+              where: { shareId: { in: shareIds } },
+            });
+          }
+        }
+
+        await tx.file.delete({ where: { blobId } });
+      });
+
+      return NextResponse.json(
+        {
+          message: "Demo file deleted successfully",
+          blobId,
+          walrusDeleted: false,
+          demo: true,
+        },
+        { status: 200, headers: withCORS(req) },
+      );
+    }
+
     let blobObjectId = fileRecord.blobObjectId || null;
 
     // Initialize Walrus once — we need the signer address to key the queue,

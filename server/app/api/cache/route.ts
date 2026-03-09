@@ -68,7 +68,7 @@ export async function GET(req: Request) {
       const isDemoUser = !!user?.username?.startsWith("demo_");
 
       if (isDemoUser) {
-        const demoExpiry = new Date("2026-06-01T23:59:59.999Z");
+        const demoExpiry = new Date(Date.now() + 50 * 24 * 60 * 60 * 1000);
         await prisma.file.updateMany({
           where: {
             userId,
@@ -76,7 +76,7 @@ export async function GET(req: Request) {
           },
           data: {
             expiresAt: demoExpiry,
-            epochs: 365,
+            epochs: 50,
             status: "completed",
           },
         });
@@ -100,7 +100,7 @@ export async function GET(req: Request) {
               filename: "home-demo-notes.txt",
               originalSize: 12_480,
               contentType: "text/plain",
-              epochs: 365,
+              epochs: 50,
               status: "completed",
               uploadedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
               expiresAt: demoExpiry,

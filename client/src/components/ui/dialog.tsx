@@ -15,13 +15,35 @@ export function Dialog({
   children,
   dismissible = true,
 }: DialogProps) {
+  React.useEffect(() => {
+    if (open) {
+      document.body.style.pointerEvents = "none";
+      document.body.style.overflow = "hidden";
+    }
+    return () => {
+      document.body.style.pointerEvents = "";
+      document.body.style.overflow = "";
+    };
+  }, [open]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ pointerEvents: "auto" }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div
         className="fixed inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={() => {
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
           if (dismissible) onOpenChange(false);
         }}
       />

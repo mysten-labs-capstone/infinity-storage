@@ -204,9 +204,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             <AlertTriangle className="h-3 w-3 sm:h-4 sm:w-4" />
           </button>
 
-          <div className="h-px w-8 sm:w-10 bg-zinc-800 my-1 sm:my-1.5" />
-
-          {/* Add folder button */}
+          {/* Create folder button */}
           <button
             onClick={() => handleCreateFolder(null)}
             className="p-1 sm:p-1.5 hover:bg-zinc-800 rounded-md transition-colors text-gray-300 hover:text-white"
@@ -214,6 +212,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           >
             <FolderPlus className="h-3 w-3 sm:h-4 sm:w-4" />
           </button>
+
+          <div className="h-px w-8 sm:w-10 bg-zinc-800 my-1 sm:my-1.5" />
 
           {/* Folder icons (scrollable if many) */}
           <div className="flex-1 overflow-y-auto overflow-x-hidden w-full flex flex-col items-center gap-1 px-1 sm:px-2">

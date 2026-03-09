@@ -3396,7 +3396,7 @@ export default function FolderCardView({
           }
         }}
       >
-        <div className="flex items-start gap-3 w-full">
+        <div className="file-row-inner flex items-start gap-3 w-full">
           <div className="file-icon-wrapper flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-900/40 to-teal-900/40">
             {f.encrypted ? (
               <Lock className="file-lock-icon h-5 w-5 text-green-400" />
@@ -3410,8 +3410,8 @@ export default function FolderCardView({
               <p className="font-medium text-gray-100 truncate">
                 {truncateFileName(f.name)}
               </p>
-              <span className="inline-flex items-center gap-1 ml-2">
-                {/* Walrus badge: completed with real blobId */}
+              {/* Badge in name row — desktop only */}
+              <span className="hidden sm:inline-flex items-center gap-1 ml-2">
                 {displayStatus === "completed" &&
                   !displayBlobId.startsWith("temp_") && (
                     <StatusBadgeTooltip title={STATUS_BADGE_TOOLTIPS.walrus}>
@@ -3421,8 +3421,6 @@ export default function FolderCardView({
                       </span>
                     </StatusBadgeTooltip>
                   )}
-
-                {/* Decentralizing badge: processing (actively uploading to Walrus) */}
                 {displayStatus === "processing" && (
                   <StatusBadgeTooltip
                     title={STATUS_BADGE_TOOLTIPS.decentralizing}
@@ -3433,8 +3431,6 @@ export default function FolderCardView({
                     </span>
                   </StatusBadgeTooltip>
                 )}
-
-                {/* Pending badge: waiting to upload, completed-with-temp-blobId, or failed (will retry; same UX as pending) */}
                 {(displayStatus === "pending" ||
                   displayStatus === "failed" ||
                   (displayStatus === "completed" &&
@@ -3451,8 +3447,8 @@ export default function FolderCardView({
 
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-300">
               <span>{formatBytes(f.size)}</span>
-              <span>•</span>
-              <span>{formatDate(f.uploadedAt)}</span>
+              <span className="file-meta-sep-date">•</span>
+              <span className="file-meta-date">{formatDate(f.uploadedAt)}</span>
               <span>•</span>
               <span
                 className={
@@ -3464,6 +3460,39 @@ export default function FolderCardView({
                 }
               >
                 {expiry.isExpired ? "Expired" : `${expiry.daysRemaining}d left`}
+              </span>
+              {/* Status badge — meta row, mobile only */}
+              <span className="sm:hidden inline-flex items-center gap-1">
+                {displayStatus === "completed" &&
+                  !displayBlobId.startsWith("temp_") && (
+                    <StatusBadgeTooltip title={STATUS_BADGE_TOOLTIPS.walrus}>
+                      <span className="status-badge completed encryption-badge inline-flex items-center gap-1 rounded-full bg-emerald-900/30 px-2 py-0.5 text-xs font-medium text-emerald-300">
+                        <HardDrive className="h-3 w-3" />
+                        Walrus
+                      </span>
+                    </StatusBadgeTooltip>
+                  )}
+                {displayStatus === "processing" && (
+                  <StatusBadgeTooltip
+                    title={STATUS_BADGE_TOOLTIPS.decentralizing}
+                  >
+                    <span className="status-badge processing inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Decentralizing
+                    </span>
+                  </StatusBadgeTooltip>
+                )}
+                {(displayStatus === "pending" ||
+                  displayStatus === "failed" ||
+                  (displayStatus === "completed" &&
+                    displayBlobId.startsWith("temp_"))) && (
+                  <StatusBadgeTooltip title={STATUS_BADGE_TOOLTIPS.pending}>
+                    <span className="status-badge processing inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Pending
+                    </span>
+                  </StatusBadgeTooltip>
+                )}
               </span>
               {shareInfo &&
                 (() => {
@@ -3846,7 +3875,7 @@ export default function FolderCardView({
               {!hasSelection && (
                 <>
                   <div
-                    className={`flex items-center gap-1 transition-opacity ${
+                    className={`file-quick-actions flex items-center gap-1 transition-opacity ${
                       downloadingId === f.blobId || shareActiveId === f.blobId
                         ? "opacity-100"
                         : "opacity-0 group-hover:opacity-100"
@@ -3912,7 +3941,7 @@ export default function FolderCardView({
                       e.stopPropagation();
                       handleToggleStar(f.blobId, !isStarred);
                     }}
-                    className={`p-2 rounded-lg transition-colors ${
+                    className={`file-quick-actions p-2 rounded-lg transition-colors ${
                       isStarred ||
                       downloadingId === f.blobId ||
                       shareActiveId === f.blobId
@@ -4241,11 +4270,11 @@ export default function FolderCardView({
       {/* Sort Toolbar — only shown on home/all view */}
       {currentView === "all" && (
         <div
-          className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 w-full"
+          className="flex flex-col gap-2 w-full sm:grid sm:grid-cols-[1fr_auto_1fr] sm:items-center sm:gap-3"
           onMouseDown={(e) => e.stopPropagation()}
         >
-          {/* Search bar — takes all left space (original size) */}
-          <div className="relative flex items-center min-w-[42rem]">
+          {/* Search bar — full width on mobile, left column on desktop */}
+          <div className="relative flex items-center w-full sm:min-w-0">
             <Search className="absolute left-3 h-4 w-4 text-gray-400 pointer-events-none" />
             <input
               type="text"
@@ -4265,10 +4294,10 @@ export default function FolderCardView({
             )}
           </div>
 
-          {/* Sort buttons OR multi-select action bar — centered */}
+          {/* Sort buttons OR multi-select action bar — scrollable row on mobile, centered on desktop */}
           {hasSelection ? (
             <span
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 h-8 whitespace-nowrap overflow-visible rounded-full border border-teal-600/60 bg-zinc-950 shadow-md shadow-black/30 ring-1 ring-teal-500/20"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 h-8 whitespace-nowrap overflow-x-auto rounded-full border border-teal-600/60 bg-zinc-950 shadow-md shadow-black/30 ring-1 ring-teal-500/20"
               style={{ alignSelf: "center", minWidth: "max-content" }}
             >
               <span className="text-xs text-gray-300 font-medium whitespace-nowrap">
@@ -4305,7 +4334,7 @@ export default function FolderCardView({
               </button>
             </span>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 overflow-x-auto pb-0.5 sm:pb-0 sm:flex-nowrap">
               {(
                 [
                   { key: "name" as SortField, label: "Name" },
@@ -4342,8 +4371,8 @@ export default function FolderCardView({
             </div>
           )}
 
-          {/* Right spacer to balance grid */}
-          <div />
+          {/* Right spacer to balance grid — desktop only */}
+          <div className="hidden sm:block" />
         </div>
       )}
 

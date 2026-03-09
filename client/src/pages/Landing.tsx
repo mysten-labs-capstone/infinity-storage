@@ -1794,7 +1794,7 @@ export const Landing: React.FC = () => {
                 Login
               </Link>
               <Link to="/join" className="nav-cta">
-                Get Started →
+                Get Started <span className="nav-cta-arrow">→</span>
               </Link>
             </div>
           </div>

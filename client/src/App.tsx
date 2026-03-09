@@ -325,7 +325,7 @@ export default function App() {
     if (isMobile) {
       setSidebarOpen(false);
     }
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   const handleLogout = () => {
     clearPrivateKey();
@@ -1510,6 +1510,15 @@ export default function App() {
               title="Expiring Soon"
             >
               <AlertTriangle className="h-3 w-3 sm:h-4 sm:w-4" />
+            </button>
+
+            {/* Create folder button */}
+            <button
+              onClick={() => handleCreateFolder(null)}
+              className={`p-1 sm:p-1.5 hover:bg-zinc-800 rounded-md transition-colors text-gray-300 hover:text-white`}
+              title="Create folder"
+            >
+              <FolderPlus className="h-3 w-3 sm:h-4 sm:w-4" />
             </button>
 
             {/* Folder icons (scrollable if many) */}

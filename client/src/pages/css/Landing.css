@@ -1919,6 +1919,10 @@
     display: none;
   }
 
+  .nav-cta-arrow {
+    display: none;
+  }
+
   .hero-title {
     font-size: 2.5rem;
   }

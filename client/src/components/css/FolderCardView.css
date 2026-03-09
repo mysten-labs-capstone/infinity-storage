@@ -642,3 +642,41 @@
 .space-y-6.select-none {
   cursor: crosshair;
 }
+
+/* ================================================
+   MOBILE LIST OPTIMIZATIONS (< 640px)
+   ================================================ */
+@media (max-width: 639px) {
+  /* Tighter padding on mobile */
+  .file-row {
+    padding: 0.625rem 0.75rem;
+  }
+
+  /* Smaller icon */
+  .file-row-inner .file-icon-wrapper {
+    height: 2rem;
+    width: 2rem;
+    border-radius: 0.5rem;
+  }
+
+  /* Slightly smaller filename */
+  .file-row-inner .flex-1 p.font-medium {
+    font-size: 0.8125rem;
+  }
+
+  /* Hide date uploaded — keep size + days left only */
+  .file-meta-date,
+  .file-meta-sep-date {
+    display: none;
+  }
+
+  /* Hide all hover quick-action buttons — actions go through ⋮ menu */
+  .file-quick-actions {
+    display: none !important;
+  }
+
+  /* Suppress translateX shift on hover (doesn't suit touch) */
+  .hover-enabled .file-row:hover {
+    transform: none;
+  }
+}

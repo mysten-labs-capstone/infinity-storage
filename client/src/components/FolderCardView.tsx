@@ -203,7 +203,7 @@ export default function FolderCardView({
   const folders = propFolders; // Use folders from props instead of local state
   const [folderPath, setFolderPath] = useState<
     { id: string | null; name: string }[]
-  >([{ id: null, name: "My Files" }]);
+  >([{ id: null, name: "Your Storage" }]);
 
   // File action states
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -378,6 +378,13 @@ export default function FolderCardView({
   } | null>(null);
   const contentMenuRef = useRef<HTMLDivElement | null>(null);
 
+  // Selection right-click context menu state
+  const [selectionMenuPosition, setSelectionMenuPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const selectionMenuRef = useRef<HTMLDivElement | null>(null);
+
   useLayoutEffect(() => {
     if (!contentMenuPosition || !contentMenuRef.current) return;
     const menuRect = contentMenuRef.current.getBoundingClientRect();
@@ -401,6 +408,28 @@ export default function FolderCardView({
       return { top, left };
     });
   }, [contentMenuPosition]);
+
+  useLayoutEffect(() => {
+    if (!selectionMenuPosition || !selectionMenuRef.current) return;
+    const menuRect = selectionMenuRef.current.getBoundingClientRect();
+    const margin = 8;
+    let top = selectionMenuPosition.top;
+    let left = selectionMenuPosition.left;
+
+    if (top + menuRect.height > window.innerHeight - margin) {
+      top = window.innerHeight - menuRect.height - margin;
+    }
+    if (left + menuRect.width > window.innerWidth - margin) {
+      left = window.innerWidth - menuRect.width - margin;
+    }
+    top = Math.max(margin, top);
+    left = Math.max(margin, left);
+
+    setSelectionMenuPosition((prev) => {
+      if (prev && prev.top === top && prev.left === left) return prev;
+      return { top, left };
+    });
+  }, [selectionMenuPosition]);
 
   // Multi-select state
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(
@@ -770,7 +799,7 @@ export default function FolderCardView({
   // Build folder path when current folder changes
   useEffect(() => {
     if (currentFolderId === null) {
-      setFolderPath([{ id: null, name: "My Files" }]);
+      setFolderPath([{ id: null, name: "Your Storage" }]);
       return;
     }
 
@@ -792,10 +821,10 @@ export default function FolderCardView({
       };
 
       const folder = findFolder(folderId, allFolders);
-      if (!folder) return [{ id: null, name: "My Files" }];
+      if (!folder) return [{ id: null, name: "Your Storage" }];
 
       const path: { id: string | null; name: string }[] = [
-        { id: null, name: "My Files" },
+        { id: null, name: "Your Storage" },
       ];
 
       // Build path by traversing up
@@ -844,7 +873,7 @@ export default function FolderCardView({
       };
 
       return [
-        { id: null, name: "My Files" },
+        { id: null, name: "Your Storage" },
         ...findIdByPath(names, allFolders, null),
       ];
     };
@@ -1675,6 +1704,15 @@ export default function FolderCardView({
     if (currentView !== "all") return;
 
     const target = e.target as HTMLElement;
+
+    // Don't start drag selection if the click target is outside the container
+    // (e.g. inside a portal-rendered dialog)
+    if (
+      selectionContainerRef.current &&
+      !selectionContainerRef.current.contains(target)
+    ) {
+      return;
+    }
 
     // Don't start drag selection if clicking on buttons or inputs
     if (
@@ -3341,12 +3379,21 @@ export default function FolderCardView({
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          setOpenMenuId(f.blobId);
-          setFileMenuAnchorRect(new DOMRect(e.clientX, e.clientY, 0, 0));
-          setFileMenuPosition({
-            top: e.clientY + 4,
-            left: e.clientX + 4,
-          });
+          const isFileSelected = selectedFileIds.has(f.blobId);
+          const totalSelected = selectedFileIds.size + selectedFolderIds.size;
+          if (isFileSelected && totalSelected > 1) {
+            setSelectionMenuPosition({
+              top: e.clientY + 4,
+              left: e.clientX + 4,
+            });
+          } else {
+            setOpenMenuId(f.blobId);
+            setFileMenuAnchorRect(new DOMRect(e.clientX, e.clientY, 0, 0));
+            setFileMenuPosition({
+              top: e.clientY + 4,
+              left: e.clientX + 4,
+            });
+          }
         }}
       >
         <div className="flex items-start gap-3 w-full">
@@ -3755,7 +3802,12 @@ export default function FolderCardView({
                       createPortal(
                         <div
                           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-                          onClick={() => setShowQRForBlobId(null)}
+                          style={{ pointerEvents: "auto" }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowQRForBlobId(null);
+                          }}
                         >
                           <div
                             className="bg-zinc-900 rounded-lg p-6 border border-zinc-700 shadow-xl max-w-sm w-11/12"
@@ -3791,89 +3843,93 @@ export default function FolderCardView({
           {/* Hover quick actions + file menu button - Hide download/share in shared view */}
           {currentView !== "shared" && (
             <div className="ml-2 flex items-center gap-1 self-center">
-              <div
-                className={`flex items-center gap-1 transition-opacity ${
-                  downloadingId === f.blobId || shareActiveId === f.blobId
-                    ? "opacity-100"
-                    : "opacity-0 group-hover:opacity-100"
-                }`}
-              >
-                <button
-                  title="Download"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    downloadFile(f.blobId, f.name, f.encrypted);
-                  }}
-                  className={`p-2 rounded-lg transition-colors ${
-                    downloadingId === f.blobId
-                      ? "bg-emerald-500/20 text-emerald-400"
-                      : "hover:bg-zinc-800 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  {downloadingId === f.blobId ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
-                  ) : (
-                    <Download className="h-5 w-5 text-gray-400" />
-                  )}
-                </button>
-                <button
-                  title="Share"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShareActiveId(f.blobId);
-                    handleShare(f.blobId, f.name);
-                  }}
-                  className={`p-2 rounded-lg transition-colors ${
-                    shareActiveId === f.blobId
-                      ? "bg-emerald-500/20 text-emerald-400"
-                      : "hover:bg-zinc-800 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  {shareActiveId === f.blobId ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
-                  ) : (
-                    <Share2 className="h-5 w-5 text-gray-400" />
-                  )}
-                </button>
-                <button
-                  title="Move to Folder"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setFileToMove({
-                      id: f.id,
-                      blobId: f.blobId,
-                      name: f.name,
-                      currentFolderId: f.folderId,
-                    });
-                    setMoveDialogOpen(true);
-                  }}
-                  className="p-2 hover:bg-zinc-800 dark:hover:bg-zinc-700 rounded-lg transition-colors"
-                >
-                  <FolderInput className="h-5 w-5 text-gray-400" />
-                </button>
-              </div>
-              <button
-                title={isStarred ? "Unfavorite" : "Favorite"}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleToggleStar(f.blobId, !isStarred);
-                }}
-                className={`p-2 rounded-lg transition-colors ${
-                  isStarred ||
-                  downloadingId === f.blobId ||
-                  shareActiveId === f.blobId
-                    ? "opacity-100"
-                    : "opacity-0 group-hover:opacity-100"
-                } hover:bg-zinc-800 dark:hover:bg-zinc-700 group`}
-              >
-                <Star
-                  className={`h-5 w-5 transition-all ${
-                    isStarred
-                      ? "text-emerald-300 fill-emerald-300"
-                      : "text-gray-400 hover:text-emerald-300"
-                  }`}
-                />
-              </button>
+              {!hasSelection && (
+                <>
+                  <div
+                    className={`flex items-center gap-1 transition-opacity ${
+                      downloadingId === f.blobId || shareActiveId === f.blobId
+                        ? "opacity-100"
+                        : "opacity-0 group-hover:opacity-100"
+                    }`}
+                  >
+                    <button
+                      title="Download"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadFile(f.blobId, f.name, f.encrypted);
+                      }}
+                      className={`p-2 rounded-lg transition-colors ${
+                        downloadingId === f.blobId
+                          ? "bg-emerald-500/20 text-emerald-400"
+                          : "hover:bg-zinc-800 dark:hover:bg-zinc-700"
+                      }`}
+                    >
+                      {downloadingId === f.blobId ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
+                      ) : (
+                        <Download className="h-5 w-5 text-gray-400" />
+                      )}
+                    </button>
+                    <button
+                      title="Share"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShareActiveId(f.blobId);
+                        handleShare(f.blobId, f.name);
+                      }}
+                      className={`p-2 rounded-lg transition-colors ${
+                        shareActiveId === f.blobId
+                          ? "bg-emerald-500/20 text-emerald-400"
+                          : "hover:bg-zinc-800 dark:hover:bg-zinc-700"
+                      }`}
+                    >
+                      {shareActiveId === f.blobId ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
+                      ) : (
+                        <Share2 className="h-5 w-5 text-gray-400" />
+                      )}
+                    </button>
+                    <button
+                      title="Move to Folder"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFileToMove({
+                          id: f.id,
+                          blobId: f.blobId,
+                          name: f.name,
+                          currentFolderId: f.folderId,
+                        });
+                        setMoveDialogOpen(true);
+                      }}
+                      className="p-2 hover:bg-zinc-800 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                    >
+                      <FolderInput className="h-5 w-5 text-gray-400" />
+                    </button>
+                  </div>
+                  <button
+                    title={isStarred ? "Unfavorite" : "Favorite"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleStar(f.blobId, !isStarred);
+                    }}
+                    className={`p-2 rounded-lg transition-colors ${
+                      isStarred ||
+                      downloadingId === f.blobId ||
+                      shareActiveId === f.blobId
+                        ? "opacity-100"
+                        : "opacity-0 group-hover:opacity-100"
+                    } hover:bg-zinc-800 dark:hover:bg-zinc-700 group`}
+                  >
+                    <Star
+                      className={`h-5 w-5 transition-all ${
+                        isStarred
+                          ? "text-emerald-300 fill-emerald-300"
+                          : "text-gray-400 hover:text-emerald-300"
+                      }`}
+                    />
+                  </button>
+                </>
+              )}
 
               {/* File menu button */}
               <button
@@ -4489,11 +4545,21 @@ export default function FolderCardView({
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    setOpenFolderMenuId(folder.id);
-                    setFolderMenuPosition({
-                      top: e.clientY + 4,
-                      left: e.clientX + 4,
-                    });
+                    const isFolderSelected = selectedFolderIds.has(folder.id);
+                    const totalSelected =
+                      selectedFileIds.size + selectedFolderIds.size;
+                    if (isFolderSelected && totalSelected > 1) {
+                      setSelectionMenuPosition({
+                        top: e.clientY + 4,
+                        left: e.clientX + 4,
+                      });
+                    } else {
+                      setOpenFolderMenuId(folder.id);
+                      setFolderMenuPosition({
+                        top: e.clientY + 4,
+                        left: e.clientX + 4,
+                      });
+                    }
                   }}
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -5092,6 +5158,57 @@ export default function FolderCardView({
               >
                 <FolderUp className="h-4 w-4" />
                 Folder Upload
+              </button>
+            </div>
+          </>,
+          document.body,
+        )}
+
+      {/* Selection Context Menu - Right-click on selected files/folders */}
+      {selectionMenuPosition &&
+        typeof window !== "undefined" &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[110]"
+              onClick={() => setSelectionMenuPosition(null)}
+            />
+            <div
+              ref={selectionMenuRef}
+              className="fixed z-[111] bg-zinc-900 rounded-lg shadow-lg border border-zinc-800 py-1 min-w-[160px]"
+              style={{
+                top: `${selectionMenuPosition.top}px`,
+                left: `${selectionMenuPosition.left}px`,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-zinc-800">
+                {selectedFileIds.size + selectedFolderIds.size} selected
+              </div>
+              <button
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-zinc-800 text-white text-left"
+                disabled={bulkDownloading}
+                onClick={() => {
+                  setSelectionMenuPosition(null);
+                  bulkDownloadFoldersAndFiles();
+                }}
+              >
+                {bulkDownloading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                {bulkDownloading ? "Downloading..." : "Download"}
+              </button>
+              <button
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-zinc-800 text-red-400 text-left"
+                onClick={() => {
+                  setSelectionMenuPosition(null);
+                  promptBulkDelete();
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
               </button>
             </div>
           </>,

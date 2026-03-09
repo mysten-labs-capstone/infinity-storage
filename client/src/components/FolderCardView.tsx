@@ -203,7 +203,7 @@ export default function FolderCardView({
   const folders = propFolders; // Use folders from props instead of local state
   const [folderPath, setFolderPath] = useState<
     { id: string | null; name: string }[]
-  >([{ id: null, name: "My Files" }]);
+  >([{ id: null, name: "Your Storage" }]);
 
   // File action states
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -799,7 +799,7 @@ export default function FolderCardView({
   // Build folder path when current folder changes
   useEffect(() => {
     if (currentFolderId === null) {
-      setFolderPath([{ id: null, name: "My Files" }]);
+      setFolderPath([{ id: null, name: "Your Storage" }]);
       return;
     }
 
@@ -821,10 +821,10 @@ export default function FolderCardView({
       };
 
       const folder = findFolder(folderId, allFolders);
-      if (!folder) return [{ id: null, name: "My Files" }];
+      if (!folder) return [{ id: null, name: "Your Storage" }];
 
       const path: { id: string | null; name: string }[] = [
-        { id: null, name: "My Files" },
+        { id: null, name: "Your Storage" },
       ];
 
       // Build path by traversing up
@@ -873,7 +873,7 @@ export default function FolderCardView({
       };
 
       return [
-        { id: null, name: "My Files" },
+        { id: null, name: "Your Storage" },
         ...findIdByPath(names, allFolders, null),
       ];
     };

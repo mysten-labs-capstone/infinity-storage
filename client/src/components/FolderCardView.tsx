@@ -1705,6 +1705,15 @@ export default function FolderCardView({
 
     const target = e.target as HTMLElement;
 
+    // Don't start drag selection if the click target is outside the container
+    // (e.g. inside a portal-rendered dialog)
+    if (
+      selectionContainerRef.current &&
+      !selectionContainerRef.current.contains(target)
+    ) {
+      return;
+    }
+
     // Don't start drag selection if clicking on buttons or inputs
     if (
       target.tagName === "INPUT" ||
@@ -3834,89 +3843,93 @@ export default function FolderCardView({
           {/* Hover quick actions + file menu button - Hide download/share in shared view */}
           {currentView !== "shared" && (
             <div className="ml-2 flex items-center gap-1 self-center">
-              <div
-                className={`flex items-center gap-1 transition-opacity ${
-                  downloadingId === f.blobId || shareActiveId === f.blobId
-                    ? "opacity-100"
-                    : "opacity-0 group-hover:opacity-100"
-                }`}
-              >
-                <button
-                  title="Download"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    downloadFile(f.blobId, f.name, f.encrypted);
-                  }}
-                  className={`p-2 rounded-lg transition-colors ${
-                    downloadingId === f.blobId
-                      ? "bg-emerald-500/20 text-emerald-400"
-                      : "hover:bg-zinc-800 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  {downloadingId === f.blobId ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
-                  ) : (
-                    <Download className="h-5 w-5 text-gray-400" />
-                  )}
-                </button>
-                <button
-                  title="Share"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShareActiveId(f.blobId);
-                    handleShare(f.blobId, f.name);
-                  }}
-                  className={`p-2 rounded-lg transition-colors ${
-                    shareActiveId === f.blobId
-                      ? "bg-emerald-500/20 text-emerald-400"
-                      : "hover:bg-zinc-800 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  {shareActiveId === f.blobId ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
-                  ) : (
-                    <Share2 className="h-5 w-5 text-gray-400" />
-                  )}
-                </button>
-                <button
-                  title="Move to Folder"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setFileToMove({
-                      id: f.id,
-                      blobId: f.blobId,
-                      name: f.name,
-                      currentFolderId: f.folderId,
-                    });
-                    setMoveDialogOpen(true);
-                  }}
-                  className="p-2 hover:bg-zinc-800 dark:hover:bg-zinc-700 rounded-lg transition-colors"
-                >
-                  <FolderInput className="h-5 w-5 text-gray-400" />
-                </button>
-              </div>
-              <button
-                title={isStarred ? "Unfavorite" : "Favorite"}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleToggleStar(f.blobId, !isStarred);
-                }}
-                className={`p-2 rounded-lg transition-colors ${
-                  isStarred ||
-                  downloadingId === f.blobId ||
-                  shareActiveId === f.blobId
-                    ? "opacity-100"
-                    : "opacity-0 group-hover:opacity-100"
-                } hover:bg-zinc-800 dark:hover:bg-zinc-700 group`}
-              >
-                <Star
-                  className={`h-5 w-5 transition-all ${
-                    isStarred
-                      ? "text-emerald-300 fill-emerald-300"
-                      : "text-gray-400 hover:text-emerald-300"
-                  }`}
-                />
-              </button>
+              {!hasSelection && (
+                <>
+                  <div
+                    className={`flex items-center gap-1 transition-opacity ${
+                      downloadingId === f.blobId || shareActiveId === f.blobId
+                        ? "opacity-100"
+                        : "opacity-0 group-hover:opacity-100"
+                    }`}
+                  >
+                    <button
+                      title="Download"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadFile(f.blobId, f.name, f.encrypted);
+                      }}
+                      className={`p-2 rounded-lg transition-colors ${
+                        downloadingId === f.blobId
+                          ? "bg-emerald-500/20 text-emerald-400"
+                          : "hover:bg-zinc-800 dark:hover:bg-zinc-700"
+                      }`}
+                    >
+                      {downloadingId === f.blobId ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
+                      ) : (
+                        <Download className="h-5 w-5 text-gray-400" />
+                      )}
+                    </button>
+                    <button
+                      title="Share"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShareActiveId(f.blobId);
+                        handleShare(f.blobId, f.name);
+                      }}
+                      className={`p-2 rounded-lg transition-colors ${
+                        shareActiveId === f.blobId
+                          ? "bg-emerald-500/20 text-emerald-400"
+                          : "hover:bg-zinc-800 dark:hover:bg-zinc-700"
+                      }`}
+                    >
+                      {shareActiveId === f.blobId ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
+                      ) : (
+                        <Share2 className="h-5 w-5 text-gray-400" />
+                      )}
+                    </button>
+                    <button
+                      title="Move to Folder"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFileToMove({
+                          id: f.id,
+                          blobId: f.blobId,
+                          name: f.name,
+                          currentFolderId: f.folderId,
+                        });
+                        setMoveDialogOpen(true);
+                      }}
+                      className="p-2 hover:bg-zinc-800 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                    >
+                      <FolderInput className="h-5 w-5 text-gray-400" />
+                    </button>
+                  </div>
+                  <button
+                    title={isStarred ? "Unfavorite" : "Favorite"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleStar(f.blobId, !isStarred);
+                    }}
+                    className={`p-2 rounded-lg transition-colors ${
+                      isStarred ||
+                      downloadingId === f.blobId ||
+                      shareActiveId === f.blobId
+                        ? "opacity-100"
+                        : "opacity-0 group-hover:opacity-100"
+                    } hover:bg-zinc-800 dark:hover:bg-zinc-700 group`}
+                  >
+                    <Star
+                      className={`h-5 w-5 transition-all ${
+                        isStarred
+                          ? "text-emerald-300 fill-emerald-300"
+                          : "text-gray-400 hover:text-emerald-300"
+                      }`}
+                    />
+                  </button>
+                </>
+              )}
 
               {/* File menu button */}
               <button

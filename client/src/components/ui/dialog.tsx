@@ -18,11 +18,9 @@ export function Dialog({
 }: DialogProps) {
   React.useEffect(() => {
     if (open) {
-      document.body.style.pointerEvents = "none";
       document.body.style.overflow = "hidden";
     }
     return () => {
-      document.body.style.pointerEvents = "";
       document.body.style.overflow = "";
     };
   }, [open]);
@@ -36,6 +34,7 @@ export function Dialog({
     >
       <div
         className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+        style={{ pointerEvents: "auto" }}
         onClick={() => {
           if (dismissible) onOpenChange(false);
         }}

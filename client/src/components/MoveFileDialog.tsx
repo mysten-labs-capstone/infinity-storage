@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   FolderInput,
   Folder,
@@ -65,6 +66,17 @@ export default function MoveFileDialog({
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (open) {
+      document.body.style.pointerEvents = "none";
+      document.body.style.overflow = "hidden";
+    }
+    return () => {
+      document.body.style.pointerEvents = "";
+      document.body.style.overflow = "";
+    };
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -198,18 +210,20 @@ export default function MoveFileDialog({
   const fileNames =
     files.length === 1 ? files[0].name : `${files.length} files`;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ pointerEvents: "auto" }}
+    >
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={() => onClose()}
       />
 
       {/* Dialog */}
       <div
         className="relative bg-zinc-900 rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden max-h-[80vh] flex flex-col border border-zinc-800"
-        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -328,6 +342,7 @@ export default function MoveFileDialog({
           }}
         />
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }

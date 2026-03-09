@@ -1,4 +1,5 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 interface DialogProps {
@@ -28,29 +29,22 @@ export function Dialog({
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ pointerEvents: "auto" }}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
     >
       <div
         className="fixed inset-0 bg-black/50 backdrop-blur-sm"
-        onMouseDown={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
+        onClick={() => {
           if (dismissible) onOpenChange(false);
         }}
       />
       <div className="relative z-50 w-full max-w-lg animate-in fade-in-0 zoom-in-95">
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

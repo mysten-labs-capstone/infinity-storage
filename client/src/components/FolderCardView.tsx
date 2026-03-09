@@ -3793,7 +3793,12 @@ export default function FolderCardView({
                       createPortal(
                         <div
                           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-                          onClick={() => setShowQRForBlobId(null)}
+                          style={{ pointerEvents: "auto" }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowQRForBlobId(null);
+                          }}
                         >
                           <div
                             className="bg-zinc-900 rounded-lg p-6 border border-zinc-700 shadow-xl max-w-sm w-11/12"

@@ -276,7 +276,6 @@ export function ShareDialog({
       onOpenChange={(isOpen) => {
         if (!isOpen) handleClose();
       }}
-      dismissible={false}
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader className="space-y-3 pb-2">
@@ -323,28 +322,55 @@ export function ShareDialog({
                       <div
                         className="absolute top-1/2 -translate-y-1/2 h-2 rounded-full bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 shadow-lg shadow-emerald-500/20 pointer-events-none"
                         style={{
-                          width: `${((Number(tempDays) || 0) / (Number.isFinite(daysRemaining) ? daysRemaining : 365)) * 100}%`,
+                          width: `${(() => {
+                            const max = Number.isFinite(daysRemaining)
+                              ? daysRemaining
+                              : 365;
+                            const val = Number(tempDays) || 1;
+                            return max <= 1
+                              ? 100
+                              : ((val - 1) / (max - 1)) * 100;
+                          })()}%`,
                         }}
                       />
 
                       {/* Styled range input */}
-                      <input
-                        type="range"
-                        min="1"
-                        max={
-                          Number.isFinite(daysRemaining) ? daysRemaining : 365
-                        }
-                        value={Number(tempDays) || 1}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setTempDays(value);
-                          setExpiresInDays(Number(value));
-                        }}
-                        className="relative w-full h-2 bg-transparent appearance-none cursor-pointer z-10"
-                        style={{
-                          WebkitAppearance: "none",
-                        }}
-                      />
+                      {Number.isFinite(daysRemaining) && daysRemaining <= 1 ? (
+                        /* Static thumb pinned to the right when only 1 day remains */
+                        <div className="relative w-full h-2 z-10 flex items-center justify-end">
+                          <div
+                            style={{
+                              width: "20px",
+                              height: "20px",
+                              minWidth: "20px",
+                              minHeight: "20px",
+                              borderRadius: "50%",
+                              background:
+                                "linear-gradient(135deg, #34d399 0%, #14b8a6 100%)",
+                              border: "3px solid #0f172a",
+                              boxShadow: "0 4px 12px rgba(16, 185, 129, 0.4)",
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <input
+                          type="range"
+                          min="1"
+                          max={
+                            Number.isFinite(daysRemaining) ? daysRemaining : 365
+                          }
+                          value={Number(tempDays) || 1}
+                          onChange={(e) => {
+                            const value = Math.max(1, Number(e.target.value));
+                            setTempDays(String(value));
+                            setExpiresInDays(value);
+                          }}
+                          className="relative w-full h-2 bg-transparent appearance-none cursor-pointer z-10"
+                          style={{
+                            WebkitAppearance: "none",
+                          }}
+                        />
+                      )}
 
                       <style>{`
                       input[type="range"]::-webkit-slider-thumb {

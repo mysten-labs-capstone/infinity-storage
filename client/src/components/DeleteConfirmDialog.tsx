@@ -37,7 +37,7 @@ export function DeleteConfirmDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} dismissible={false}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <div className="py-4">
           <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 p-4">

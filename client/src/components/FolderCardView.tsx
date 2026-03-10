@@ -4162,8 +4162,6 @@ export default function FolderCardView({
     );
   };
 
-
-
   const isEmpty =
     currentLevelFolders.length === 0 && currentLevelFiles.length === 0;
 
@@ -4581,8 +4579,8 @@ export default function FolderCardView({
                     />
 
                     <p className="font-medium text-gray-100 truncate flex-1 min-w-0 text-base">
-                        {folder.name}
-                      </p>
+                      {folder.name}
+                    </p>
                   </div>
 
                   {/* Folder menu button - always visible */}
@@ -4672,7 +4670,10 @@ export default function FolderCardView({
                           <button
                             className="w-full flex items-center gap-2 px-2 py-2 text-sm hover:bg-zinc-800 text-white text-left"
                             onClick={() => {
-                              setRenamingFolder({ id: folder.id, name: folder.name });
+                              setRenamingFolder({
+                                id: folder.id,
+                                name: folder.name,
+                              });
                               setOpenFolderMenuId(null);
                               setFolderMenuPosition(null);
                             }}

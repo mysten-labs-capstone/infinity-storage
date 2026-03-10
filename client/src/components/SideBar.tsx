@@ -353,8 +353,6 @@ export default function FolderTree({
     });
   };
 
-
-
   const renderFolder = (folder: FolderNode, depth: number = 0) => {
     const isExpanded = expandedIds.has(folder.id);
     const isSelected = selectedFolderId === folder.id;

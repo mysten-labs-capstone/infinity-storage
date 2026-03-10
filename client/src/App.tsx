@@ -1254,10 +1254,7 @@ export default function App() {
     }
   };
 
-  const handleFolderRenamedOptimistic = (
-    folderId: string,
-    newName: string,
-  ) => {
+  const handleFolderRenamedOptimistic = (folderId: string, newName: string) => {
     setFolders((prev) => {
       const renameInTree = (folderList: any[]): any[] =>
         folderList.map((folder) => ({

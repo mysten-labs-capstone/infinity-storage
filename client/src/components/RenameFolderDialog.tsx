@@ -121,9 +121,7 @@ export default function RenameFolderDialog({
             <div className="p-2 bg-emerald-900/30 rounded-lg">
               <Pencil className="h-5 w-5 text-emerald-400" />
             </div>
-            <h2 className="text-lg font-semibold text-white">
-              Rename Folder
-            </h2>
+            <h2 className="text-lg font-semibold text-white">Rename Folder</h2>
           </div>
           <button
             onClick={onClose}

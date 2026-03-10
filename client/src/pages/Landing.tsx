@@ -2054,7 +2054,7 @@ export const Landing: React.FC = () => {
                   <div className="footer-dropdown-menu">
                     <a
                       href={apiUrl(
-                        "/recovery-tools/file-recovery-tool-macos-arm64",
+                        "/api/recovery-tools/file-recovery-tool-macos-arm64",
                       )}
                       download
                     >
@@ -2062,7 +2062,7 @@ export const Landing: React.FC = () => {
                     </a>
                     <a
                       href={apiUrl(
-                        "/recovery-tools/file-recovery-tool-macos-x64",
+                        "/api/recovery-tools/file-recovery-tool-macos-x64",
                       )}
                       download
                     >
@@ -2072,7 +2072,7 @@ export const Landing: React.FC = () => {
                 </div>
                 <a
                   href={apiUrl(
-                    "/recovery-tools/file-recovery-tool-win-x64.exe",
+                    "/api/recovery-tools/file-recovery-tool-win-x64.exe",
                   )}
                   download
                   className="footer-download-link"
@@ -2087,7 +2087,9 @@ export const Landing: React.FC = () => {
                   Windows
                 </a>
                 <a
-                  href={apiUrl("/recovery-tools/file-recovery-tool-linux-x64")}
+                  href={apiUrl(
+                    "/api/recovery-tools/file-recovery-tool-linux-x64",
+                  )}
                   download
                   className="footer-download-link"
                 >

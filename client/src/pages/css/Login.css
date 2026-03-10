@@ -324,13 +324,25 @@
   }
 
   @keyframes slideOut {
-    from { opacity: 1; transform: translateY(0); }
-    to   { opacity: 0; transform: translateY(-18px); }
+    from {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(-18px);
+    }
   }
 
   @keyframes slideIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   /* Legacy classes kept for compatibility */
@@ -379,8 +391,13 @@
   }
 
   @keyframes svFloat {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-6px); }
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-6px);
+    }
   }
 
   /* Dashed line flow */
@@ -389,8 +406,12 @@
   }
 
   @keyframes svDashFlow {
-    0% { stroke-dashoffset: 20; }
-    100% { stroke-dashoffset: 0; }
+    0% {
+      stroke-dashoffset: 20;
+    }
+    100% {
+      stroke-dashoffset: 0;
+    }
   }
 
   /* Chunk pulse */
@@ -399,8 +420,13 @@
   }
 
   @keyframes svChunkPulse {
-    0%, 100% { opacity: 0.2; }
-    50% { opacity: 0.5; }
+    0%,
+    100% {
+      opacity: 0.2;
+    }
+    50% {
+      opacity: 0.5;
+    }
   }
 
   /* Shield pulse */
@@ -409,8 +435,15 @@
   }
 
   @keyframes svPulse {
-    0%, 100% { opacity: 0.3; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(1.05); }
+    0%,
+    100% {
+      opacity: 0.3;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.5;
+      transform: scale(1.05);
+    }
   }
 
   /* Diamond layer pulse */
@@ -431,8 +464,15 @@
   }
 
   @keyframes svLayerPulse {
-    0%, 100% { opacity: 0.3; transform: scale(1); }
-    50% { opacity: 0.7; transform: scale(1.02); }
+    0%,
+    100% {
+      opacity: 0.3;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.7;
+      transform: scale(1.02);
+    }
   }
 
   .dots {
@@ -659,5 +699,28 @@
 
   .btn-secondary:disabled {
     @apply opacity-50 cursor-not-allowed;
+  }
+
+  .btn-navy {
+    @apply backdrop-blur-md;
+    background: linear-gradient(
+      90deg,
+      rgba(17, 24, 39, 0.85),
+      rgba(31, 41, 55, 0.85)
+    );
+    box-shadow:
+      0 20px 50px rgba(2, 6, 23, 0.6),
+      0 8px 24px rgba(2, 6, 23, 0.35),
+      inset 0 -4px 8px rgba(255, 255, 255, 0.02);
+  }
+  .btn-navy:hover {
+    filter: brightness(1.15);
+  }
+  .btn-navy.liquid-btn::before {
+    background: linear-gradient(
+      135deg,
+      rgba(31, 41, 55, 0.6),
+      rgba(55, 65, 81, 0.6)
+    );
   }
 }

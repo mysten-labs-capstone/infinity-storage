@@ -20,7 +20,7 @@ export type PasswordStrengthResult = {
 const LABELS: Record<number, { label: string; color: string }> = {
   0: { label: "Very weak", color: "status-red" },
   1: { label: "Weak", color: "status-red" },
-  2: { label: "Fair", color: "status-yellow" },
+  2: { label: "Weak", color: "status-red" },
   3: { label: "Strong", color: "status-green" },
   4: { label: "Very strong", color: "status-green" },
 };

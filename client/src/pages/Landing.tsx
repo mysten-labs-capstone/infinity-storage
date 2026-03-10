@@ -5,6 +5,10 @@ import { authService } from "../services/authService";
 import { apiUrl } from "../config/api";
 import "./css/Landing.css";
 
+function downloadRecoveryTool(filename: string) {
+  window.location.href = apiUrl(`/api/recovery-tools/${filename}`);
+}
+
 // ============================================
 // INTRO LOADER - File Upload Animation
 // ============================================
@@ -2053,28 +2057,35 @@ export const Landing: React.FC = () => {
                   </button>
                   <div className="footer-dropdown-menu">
                     <a
-                      href={apiUrl(
-                        "/api/recovery-tools/file-recovery-tool-macos-arm64",
-                      )}
-                      download
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        downloadRecoveryTool(
+                          "file-recovery-tool-macos-arm64.zip",
+                        );
+                      }}
                     >
                       Apple Silicon
                     </a>
                     <a
-                      href={apiUrl(
-                        "/api/recovery-tools/file-recovery-tool-macos-x64",
-                      )}
-                      download
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        downloadRecoveryTool(
+                          "file-recovery-tool-macos-x64.zip",
+                        );
+                      }}
                     >
                       Intel
                     </a>
                   </div>
                 </div>
                 <a
-                  href={apiUrl(
-                    "/api/recovery-tools/file-recovery-tool-win-x64.exe",
-                  )}
-                  download
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    downloadRecoveryTool("file-recovery-tool-win-x64.zip");
+                  }}
                   className="footer-download-link"
                 >
                   <svg
@@ -2087,10 +2098,11 @@ export const Landing: React.FC = () => {
                   Windows
                 </a>
                 <a
-                  href={apiUrl(
-                    "/api/recovery-tools/file-recovery-tool-linux-x64",
-                  )}
-                  download
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    downloadRecoveryTool("file-recovery-tool-linux-x64.zip");
+                  }}
                   className="footer-download-link"
                 >
                   <svg

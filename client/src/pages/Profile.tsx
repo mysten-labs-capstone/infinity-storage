@@ -4,6 +4,10 @@ import { AppLayout } from "../components";
 import { authService } from "../services/authService";
 import { apiUrl } from "../config/api";
 
+function downloadRecoveryTool(filename: string) {
+  window.location.href = apiUrl(`/api/recovery-tools/${filename}`);
+}
+
 import {
   deriveKeysFromPassword,
   deriveKeysFromPasswordWithSalt,
@@ -310,10 +314,11 @@ export const Profile: React.FC = () => {
               <div className="recovery-grid">
                 {/* macOS Apple Silicon */}
                 <a
-                  href={apiUrl(
-                    "/api/recovery-tools/file-recovery-tool-macos-arm64",
-                  )}
-                  download
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    downloadRecoveryTool("file-recovery-tool-macos-arm64.zip");
+                  }}
                   className="recovery-card"
                 >
                   <div className="recovery-icon-wrap apple">
@@ -338,10 +343,11 @@ export const Profile: React.FC = () => {
 
                 {/* macOS Intel */}
                 <a
-                  href={apiUrl(
-                    "/api/recovery-tools/file-recovery-tool-macos-x64",
-                  )}
-                  download
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    downloadRecoveryTool("file-recovery-tool-macos-x64.zip");
+                  }}
                   className="recovery-card"
                 >
                   <div className="recovery-icon-wrap apple">
@@ -364,10 +370,11 @@ export const Profile: React.FC = () => {
 
                 {/* Windows */}
                 <a
-                  href={apiUrl(
-                    "/api/recovery-tools/file-recovery-tool-win-x64.exe",
-                  )}
-                  download
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    downloadRecoveryTool("file-recovery-tool-win-x64.zip");
+                  }}
                   className="recovery-card"
                 >
                   <div className="recovery-icon-wrap windows">
@@ -390,10 +397,11 @@ export const Profile: React.FC = () => {
 
                 {/* Linux */}
                 <a
-                  href={apiUrl(
-                    "/api/recovery-tools/file-recovery-tool-linux-x64",
-                  )}
-                  download
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    downloadRecoveryTool("file-recovery-tool-linux-x64.zip");
+                  }}
                   className="recovery-card"
                 >
                   <div className="recovery-icon-wrap linux">

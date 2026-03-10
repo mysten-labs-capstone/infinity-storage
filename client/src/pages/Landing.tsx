@@ -2053,13 +2053,17 @@ export const Landing: React.FC = () => {
                   </button>
                   <div className="footer-dropdown-menu">
                     <a
-                      href="/recovery-tools/file-recovery-tool-macos-arm64"
+                      href={apiUrl(
+                        "/recovery-tools/file-recovery-tool-macos-arm64",
+                      )}
                       download
                     >
                       Apple Silicon
                     </a>
                     <a
-                      href="/recovery-tools/file-recovery-tool-macos-x64"
+                      href={apiUrl(
+                        "/recovery-tools/file-recovery-tool-macos-x64",
+                      )}
                       download
                     >
                       Intel
@@ -2067,7 +2071,9 @@ export const Landing: React.FC = () => {
                   </div>
                 </div>
                 <a
-                  href="/recovery-tools/file-recovery-tool-win-x64.exe"
+                  href={apiUrl(
+                    "/recovery-tools/file-recovery-tool-win-x64.exe",
+                  )}
                   download
                   className="footer-download-link"
                 >
@@ -2081,7 +2087,7 @@ export const Landing: React.FC = () => {
                   Windows
                 </a>
                 <a
-                  href="/recovery-tools/file-recovery-tool-linux-x64"
+                  href={apiUrl("/recovery-tools/file-recovery-tool-linux-x64")}
                   download
                   className="footer-download-link"
                 >

@@ -310,7 +310,9 @@ export const Profile: React.FC = () => {
               <div className="recovery-grid">
                 {/* macOS Apple Silicon */}
                 <a
-                  href="/recovery-tools/file-recovery-tool-macos-arm64"
+                  href={apiUrl(
+                    "/recovery-tools/file-recovery-tool-macos-arm64",
+                  )}
                   download
                   className="recovery-card"
                 >
@@ -336,7 +338,7 @@ export const Profile: React.FC = () => {
 
                 {/* macOS Intel */}
                 <a
-                  href="/recovery-tools/file-recovery-tool-macos-x64"
+                  href={apiUrl("/recovery-tools/file-recovery-tool-macos-x64")}
                   download
                   className="recovery-card"
                 >
@@ -360,7 +362,9 @@ export const Profile: React.FC = () => {
 
                 {/* Windows */}
                 <a
-                  href="/recovery-tools/file-recovery-tool-win-x64.exe"
+                  href={apiUrl(
+                    "/recovery-tools/file-recovery-tool-win-x64.exe",
+                  )}
                   download
                   className="recovery-card"
                 >
@@ -384,7 +388,7 @@ export const Profile: React.FC = () => {
 
                 {/* Linux */}
                 <a
-                  href="/recovery-tools/file-recovery-tool-linux-x64"
+                  href={apiUrl("/recovery-tools/file-recovery-tool-linux-x64")}
                   download
                   className="recovery-card"
                 >

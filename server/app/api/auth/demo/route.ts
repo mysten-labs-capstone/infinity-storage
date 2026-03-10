@@ -23,7 +23,7 @@ export async function OPTIONS(req: Request) {
 export async function POST(req: NextRequest) {
   try {
     const now = new Date();
-    const demoFileExpiry = new Date(now.getTime() + 50 * 24 * 60 * 60 * 1000);
+    const demoFileExpiry = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
     const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e5)
       .toString(36)
       .padStart(3, "0")}`;
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
           filename: "strategy-deck.txt",
           originalSize: 8_192,
           contentType: "text/plain",
-          epochs: 50,
+          epochs: 3,
           status: "completed",
           uploadedAt: now,
           expiresAt: demoFileExpiry,
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
           filename: "q1-financials.txt",
           originalSize: 10_240,
           contentType: "text/plain",
-          epochs: 50,
+          epochs: 3,
           status: "completed",
           uploadedAt: now,
           expiresAt: demoFileExpiry,
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
           filename: "invoice-mar-2026.txt",
           originalSize: 5_120,
           contentType: "text/plain",
-          epochs: 50,
+          epochs: 3,
           status: "completed",
           uploadedAt: now,
           expiresAt: demoFileExpiry,
@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
           filename: "home-demo-notes.txt",
           originalSize: 12_480,
           contentType: "text/plain",
-          epochs: 50,
+          epochs: 3,
           status: "completed",
           uploadedAt: now,
           expiresAt: demoFileExpiry,

@@ -209,7 +209,10 @@ export function ExtendDurationDialog({
       const data = await response.json();
 
       // Update balance
-      setBalance(data.newBalance);
+      const nextBalance = Number(data.newBalance ?? data.balance);
+      if (Number.isFinite(nextBalance)) {
+        setBalance(nextBalance);
+      }
 
       // Clear balance cache and refresh transactions after payment
       clearBalanceCache();

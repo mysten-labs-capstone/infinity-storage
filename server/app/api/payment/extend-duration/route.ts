@@ -266,6 +266,7 @@ export async function POST(req: Request) {
           previousEpochs: currentEpochs,
           totalEpochs: updated.updatedFile.epochs,
           costUSD: finalCost,
+          newBalance: updated.updatedUser.balance,
           balance: updated.updatedUser.balance,
         },
         { status: 200, headers: withCORS(req) },

@@ -57,6 +57,7 @@ import { ShareDialog } from "./ShareDialog";
 import { PaymentApprovalDialog } from "./PaymentApprovalDialog";
 import MoveFileDialog from "./MoveFileDialog";
 import CreateFolderDialog from "./CreateFolderDialog";
+import RenameFolderDialog from "./RenameFolderDialog";
 import {
   encryptFile,
   decryptFile,
@@ -110,6 +111,7 @@ interface FolderCardViewProps {
   ) => void;
   onFolderDeleted?: () => void;
   onFolderDeletedOptimistic?: (folderId: string) => void;
+  onFolderRenamedOptimistic?: (folderId: string, newName: string) => void;
   onRequestFolderDelete?: (folderId: string, folderName: string) => void;
   onShowToast?: (opts: {
     message: string;
@@ -173,6 +175,7 @@ export default function FolderCardView({
   onFileMovedOptimistic,
   onFolderDeleted,
   onFolderDeletedOptimistic,
+  onFolderRenamedOptimistic,
   onRequestFolderDelete,
   onShowToast,
   onFolderCreated,
@@ -645,9 +648,11 @@ export default function FolderCardView({
     };
   }, [stopAutoScroll]);
 
-  // Folder editing
-  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
-  const [editingFolderName, setEditingFolderName] = useState("");
+  // Folder renaming
+  const [renamingFolder, setRenamingFolder] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
   // Generate full share URLs for encrypted files
   useEffect(() => {
@@ -4157,33 +4162,7 @@ export default function FolderCardView({
     );
   };
 
-  const handleRenameFolder = async (folderId: string) => {
-    const user = authService.getCurrentUser();
-    if (!user?.id || !editingFolderName.trim()) return;
 
-    try {
-      const res = await fetch(apiUrl(`/api/folders/${folderId}`), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-          name: editingFolderName.trim(),
-        }),
-      });
-
-      if (res.ok) {
-        onFolderCreated?.(); // Notify parent to refresh
-      } else {
-        const data = await res.json();
-        alert(data.error || "Failed to rename folder");
-      }
-    } catch (err) {
-      console.error("Failed to rename folder:", err);
-    } finally {
-      setEditingFolderId(null);
-      setEditingFolderName("");
-    }
-  };
 
   const isEmpty =
     currentLevelFolders.length === 0 && currentLevelFiles.length === 0;
@@ -4601,51 +4580,9 @@ export default function FolderCardView({
                       }}
                     />
 
-                    {editingFolderId === folder.id ? (
-                      <div className="flex items-center gap-1 flex-1 min-w-0">
-                        <input
-                          type="text"
-                          value={editingFolderName}
-                          onChange={(e) => setEditingFolderName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter")
-                              handleRenameFolder(folder.id);
-                            if (e.key === "Escape") {
-                              setEditingFolderId(null);
-                              setEditingFolderName("");
-                            }
-                          }}
-                          className="flex-1 min-w-0 bg-transparent border-b border-emerald-400 outline-none text-[15px] text-gray-100"
-                          autoFocus
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRenameFolder(folder.id);
-                          }}
-                          className="p-0.5 hover:bg-emerald-800/40 rounded transition-colors text-emerald-400 shrink-0"
-                          title="Confirm"
-                        >
-                          <Check className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingFolderId(null);
-                            setEditingFolderName("");
-                          }}
-                          className="p-0.5 hover:bg-zinc-700 rounded transition-colors text-gray-400 shrink-0"
-                          title="Cancel"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="font-medium text-gray-100 truncate flex-1 min-w-0 text-base">
+                    <p className="font-medium text-gray-100 truncate flex-1 min-w-0 text-base">
                         {folder.name}
                       </p>
-                    )}
                   </div>
 
                   {/* Folder menu button - always visible */}
@@ -4735,8 +4672,7 @@ export default function FolderCardView({
                           <button
                             className="w-full flex items-center gap-2 px-2 py-2 text-sm hover:bg-zinc-800 text-white text-left"
                             onClick={() => {
-                              setEditingFolderId(folder.id);
-                              setEditingFolderName(folder.name);
+                              setRenamingFolder({ id: folder.id, name: folder.name });
                               setOpenFolderMenuId(null);
                               setFolderMenuPosition(null);
                             }}
@@ -5014,6 +4950,16 @@ export default function FolderCardView({
           }}
         />
       )}
+
+      <RenameFolderDialog
+        open={!!renamingFolder}
+        onClose={() => setRenamingFolder(null)}
+        folderId={renamingFolder?.id ?? ""}
+        currentName={renamingFolder?.name ?? ""}
+        onRenamed={(folderId, newName) => {
+          onFolderRenamedOptimistic?.(folderId, newName);
+        }}
+      />
 
       <DeleteConfirmDialog
         open={unshareDialogOpen}

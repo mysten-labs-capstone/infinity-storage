@@ -1254,6 +1254,21 @@ export default function App() {
     }
   };
 
+  const handleFolderRenamedOptimistic = (
+    folderId: string,
+    newName: string,
+  ) => {
+    setFolders((prev) => {
+      const renameInTree = (folderList: any[]): any[] =>
+        folderList.map((folder) => ({
+          ...folder,
+          name: folder.id === folderId ? newName : folder.name,
+          children: renameInTree(folder.children || []),
+        }));
+      return renameInTree(prev);
+    });
+  };
+
   const handleFolderDeleted = () => {
     setFolderRefreshKey((prev) => prev + 1);
     loadFiles();
@@ -1607,6 +1622,7 @@ export default function App() {
                 onRefresh={loadFolders}
                 onFolderDeleted={handleFolderDeleted}
                 onFolderDeletedOptimistic={handleFolderDeletedOptimistic}
+                onFolderRenamedOptimistic={handleFolderRenamedOptimistic}
                 onRequestFolderDelete={handleRequestFolderDelete}
                 folders={folders}
                 key={folderRefreshKey}
@@ -1710,6 +1726,7 @@ export default function App() {
             onFileMovedOptimistic={handleFileMovedOptimistic}
             onFolderDeleted={handleFolderDeleted}
             onFolderDeletedOptimistic={handleFolderDeletedOptimistic}
+            onFolderRenamedOptimistic={handleFolderRenamedOptimistic}
             onRequestFolderDelete={handleRequestFolderDelete}
             onShowToast={showToast}
             onFolderCreated={handleFolderCreated}

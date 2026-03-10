@@ -2056,7 +2056,7 @@ export const Landing: React.FC = () => {
                       href="/recovery-tools/file-recovery-tool-macos-arm64"
                       download
                     >
-                      Apple Silicon (M1–M4)
+                      Apple Silicon
                     </a>
                     <a
                       href="/recovery-tools/file-recovery-tool-macos-x64"

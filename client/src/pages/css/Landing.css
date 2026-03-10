@@ -1915,6 +1915,82 @@
 }
 
 @media (max-width: 768px) {
+  .try-demo-btn {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    width: 100%;
+    max-width: 320px;
+    justify-content: center;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    background:
+      radial-gradient(
+        circle at 10% 20%,
+        rgba(255, 255, 255, 0.45) 0%,
+        transparent 45%
+      ),
+      linear-gradient(115deg, #16a34a 0%, #22c55e 48%, #14b8a6 100%);
+    background-size: 180% 180%;
+    color: #081021;
+    border: 1px solid rgba(255, 255, 255, 0.58);
+    box-shadow:
+      0 14px 30px rgba(34, 197, 94, 0.4),
+      0 0 0 1px rgba(255, 255, 255, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.38);
+    animation:
+      demoMobileGlow 2.2s ease-in-out infinite,
+      demoButtonGradientShift 3.4s ease-in-out infinite;
+  }
+
+  .try-demo-btn::before {
+    content: "";
+    position: absolute;
+    top: -140%;
+    left: -42%;
+    width: 46%;
+    height: 380%;
+    background: linear-gradient(
+      115deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.4) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    transform: rotate(18deg);
+    animation: demoButtonShimmer 2.6s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .try-demo-btn > span {
+    position: relative;
+    z-index: 1;
+  }
+
+  .try-demo-btn:hover,
+  .try-demo-btn:active {
+    transform: translateY(-1px) scale(1.015);
+    filter: saturate(1.14) brightness(1.07);
+    background:
+      radial-gradient(
+        circle at 10% 20%,
+        rgba(255, 255, 255, 0.45) 0%,
+        transparent 45%
+      ),
+      linear-gradient(115deg, #16a34a 0%, #22c55e 48%, #14b8a6 100%);
+    color: #081021;
+    border-color: rgba(255, 255, 255, 0.68);
+  }
+
+  .try-demo-btn:disabled {
+    opacity: 0.75;
+    animation: none;
+  }
+
+  .try-demo-btn:disabled::before {
+    animation: none;
+  }
+
   .nav-links {
     display: none;
   }
@@ -1965,6 +2041,57 @@
 
   .cta-title {
     font-size: 1.75rem;
+  }
+}
+
+@keyframes demoMobileGlow {
+  0%,
+  100% {
+    box-shadow:
+      0 14px 30px rgba(34, 197, 94, 0.38),
+      0 0 0 1px rgba(255, 255, 255, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.38);
+  }
+  50% {
+    box-shadow:
+      0 20px 36px rgba(16, 185, 129, 0.42),
+      0 0 0 5px rgba(34, 197, 94, 0.23),
+      inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  }
+}
+
+@keyframes demoButtonShimmer {
+  0% {
+    left: -42%;
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  55% {
+    left: 120%;
+    opacity: 0.95;
+  }
+  100% {
+    left: 120%;
+    opacity: 0;
+  }
+}
+
+@keyframes demoButtonGradientShift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .try-demo-btn,
+  .try-demo-btn::before {
+    animation: none !important;
   }
 }
 

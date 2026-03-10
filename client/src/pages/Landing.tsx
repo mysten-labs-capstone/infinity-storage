@@ -1852,10 +1852,12 @@ export const Landing: React.FC = () => {
                 </Link>
                 <button
                   onClick={handleStartDemo}
-                  className="btn-secondary"
+                  className="btn-secondary try-demo-btn"
                   disabled={startingDemo}
                 >
-                  <span>{startingDemo ? "Starting Demo..." : "Try Demo"}</span>
+                  <span>
+                    {startingDemo ? "Starting Demo..." : "Explore Demo"}
+                  </span>
                 </button>
               </div>
               <div className="hero-trust">

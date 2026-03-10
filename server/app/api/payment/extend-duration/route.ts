@@ -213,6 +213,66 @@ export async function POST(req: Request) {
       );
     }
 
+    if (blobId.startsWith("demo_")) {
+      const updated = await prisma.$transaction(async (tx) => {
+        const updatedUser = await tx.user.update({
+          where: { id: userId },
+          data: {
+            balance: {
+              decrement: finalCost,
+            },
+          },
+          select: {
+            id: true,
+            username: true,
+            balance: true,
+          },
+        });
+
+        const updatedFile = await tx.file.update({
+          where: { id: fileRecord.id },
+          data: {
+            epochs: newTotalEpochs,
+          },
+          select: {
+            id: true,
+            filename: true,
+            epochs: true,
+          },
+        });
+
+        await tx.transaction.create({
+          data: {
+            userId,
+            amount: -finalCost,
+            type: "debit",
+            description: `Extend: ${additionalEpochs * 30} days for ${updatedFile.filename}`,
+            balanceAfter: updatedUser.balance,
+          },
+        });
+
+        return { updatedUser, updatedFile };
+      });
+
+      return NextResponse.json(
+        {
+          success: true,
+          demo: true,
+          walrusExtended: false,
+          blobId,
+          fileId: updated.updatedFile.id,
+          filename: updated.updatedFile.filename,
+          additionalEpochs,
+          previousEpochs: currentEpochs,
+          totalEpochs: updated.updatedFile.epochs,
+          costUSD: finalCost,
+          newBalance: updated.updatedUser.balance,
+          balance: updated.updatedUser.balance,
+        },
+        { status: 200, headers: withCORS(req) },
+      );
+    }
+
     const { initWalrus } = await import("@/utils/walrusClient");
     const { walrusClient, signer, suiClient } = await initWalrus();
     const signerAddress = signer.toSuiAddress();

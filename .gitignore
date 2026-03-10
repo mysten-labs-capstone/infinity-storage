@@ -40,6 +40,7 @@ Thumbs.db
 *.orig
 *.rej
 *.zip
+!server/public/recovery-tools/*.zip
 *.tar.gz
 *.tgz
 *.txt

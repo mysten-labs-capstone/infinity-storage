@@ -344,24 +344,27 @@ export const Join: React.FC = () => {
                       </button>
                     </div>
 
-                    <div className="status-line status-neutral space-y-1">
-                      <p className="flex items-baseline gap-1.5">
-                        <span>Strength:</span>
-                        <span className={passwordStrength.color}>
-                          {passwordStrength.label}
-                        </span>
-                      </p>
-                      {passwordStrength.warning && (
-                        <p className="text-sm opacity-90">
-                          {passwordStrength.warning}
+                    {password.length > 0 && (
+                      <div className="status-line status-neutral space-y-1">
+                        <p className="flex items-baseline gap-1.5">
+                          <span>Strength:</span>
+                          <span className={passwordStrength.color}>
+                            {passwordStrength.label}
+                          </span>
                         </p>
-                      )}
-                      {passwordStrength.suggestion && !passwordStrength.isStrong && (
-                        <p className="text-sm opacity-90">
-                          {passwordStrength.suggestion}
-                        </p>
-                      )}
-                    </div>
+                        {passwordStrength.warning && (
+                          <p className="text-sm opacity-90">
+                            {passwordStrength.warning}
+                          </p>
+                        )}
+                        {passwordStrength.suggestion &&
+                          !passwordStrength.isStrong && (
+                            <p className="text-sm opacity-90">
+                              {passwordStrength.suggestion}
+                            </p>
+                          )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="form-group">

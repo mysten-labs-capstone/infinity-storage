@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
 import { withCORS } from "../_utils/cors";
 import prisma from "../_utils/prisma";
 import { purgeExpiredFilesForUser } from "../_utils/expiredFiles";
 
 export const runtime = "nodejs";
+
+function makeDemoBlobId(): string {
+  return `demo_${crypto.randomUUID().replace(/-/g, "")}`;
+}
 
 export async function OPTIONS(req: Request) {
   return new Response(null, { status: 204, headers: withCORS(req) });
@@ -55,7 +60,61 @@ export async function GET(req: Request) {
     }
 
     if (userId) {
-      await purgeExpiredFilesForUser(userId);
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { username: true },
+      });
+
+      const isDemoUser = !!user?.username?.startsWith("demo_");
+
+      if (isDemoUser) {
+        const demoExpiry = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+        await prisma.file.updateMany({
+          where: {
+            userId,
+            blobId: { startsWith: "demo_" },
+            epochs: { in: [50, 365] },
+          },
+          data: {
+            expiresAt: demoExpiry,
+            epochs: 3,
+            status: "completed",
+          },
+        });
+
+        // Ensure each demo user has a root-level file visible on Home.
+        const rootDemoFile = await prisma.file.findFirst({
+          where: {
+            userId,
+            filename: "home-demo-notes.txt",
+            folderId: null,
+          },
+          select: { id: true },
+        });
+
+        if (!rootDemoFile) {
+          await prisma.file.create({
+            data: {
+              userId,
+              encryptedUserId: `demo:${userId}`,
+              blobId: makeDemoBlobId(),
+              filename: "home-demo-notes.txt",
+              originalSize: 12_480,
+              contentType: "text/plain",
+              epochs: 3,
+              status: "completed",
+              uploadedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+              expiresAt: demoExpiry,
+              folderId: null,
+              encrypted: false,
+              cacheSize: 12_480,
+              cached: true,
+            },
+          });
+        }
+      } else {
+        await purgeExpiredFilesForUser(userId);
+      }
 
       // Fast read: return files as-is, no derived data.
       // Exclude files currently being deleted so a page refresh mid-deletion
@@ -81,6 +140,7 @@ export async function GET(req: Request) {
           s3Key: true,
           folderId: true,
           starred: true,
+          expiresAt: true,
         },
       });
 

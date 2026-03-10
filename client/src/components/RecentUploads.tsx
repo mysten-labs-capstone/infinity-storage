@@ -50,6 +50,7 @@ export type UploadedFile = {
   type: string;
   encrypted: boolean;
   uploadedAt: string;
+  expiresAt?: string | null;
   epochs?: number; // Storage duration in epochs
   status?: "pending" | "processing" | "completed" | "failed";
   s3Key?: string | null;
@@ -883,6 +884,7 @@ YOUR FILES:
           filename={shareFile.filename}
           encrypted={shareFile.encrypted}
           uploadedAt={shareFile.uploadedAt}
+          expiresAt={shareFile.expiresAt}
           epochs={shareFile.epochs}
         />
       )}

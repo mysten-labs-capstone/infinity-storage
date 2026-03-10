@@ -15,6 +15,7 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 const STORAGE_KEY = "walrus_session_key";
+const DEMO_STORAGE_KEY = "walrus_demo_session_key";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   // Persist key in sessionStorage (cleared when tab closes, survives refresh)
@@ -28,6 +29,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (storedKey && !user) {
         sessionStorage.removeItem(STORAGE_KEY);
         return "";
+      }
+      if (!storedKey && user?.username?.startsWith("demo_")) {
+        return localStorage.getItem(DEMO_STORAGE_KEY) || "";
       }
       return storedKey;
     } catch {
@@ -114,10 +118,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setPrivateKey = (key: string) => {
     setPrivateKeyState(key);
     try {
+      const user = authService.getCurrentUser();
       if (key) {
         sessionStorage.setItem(STORAGE_KEY, key);
+        if (user?.username?.startsWith("demo_")) {
+          localStorage.setItem(DEMO_STORAGE_KEY, key);
+        }
       } else {
         sessionStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(DEMO_STORAGE_KEY);
       }
     } catch (err) {
       console.error("Failed to persist encryption key:", err);
@@ -128,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPrivateKeyState("");
     try {
       sessionStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(DEMO_STORAGE_KEY);
     } catch (err) {
       console.error("Failed to clear encryption key:", err);
     }

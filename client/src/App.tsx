@@ -69,6 +69,7 @@ export default function App() {
   const [epochs, setEpochs] = useState(3); // Default: 3 epochs = 90 days
   const daysPerEpoch = useDaysPerEpoch();
   const user = authService.getCurrentUser();
+  const isDemoAccount = user?.username?.startsWith("demo_") ?? false;
 
   // Folder system state
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -325,7 +326,7 @@ export default function App() {
     if (isMobile) {
       setSidebarOpen(false);
     }
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   const handleLogout = () => {
     clearPrivateKey();
@@ -487,6 +488,7 @@ export default function App() {
           type: f.contentType || "application/octet-stream",
           encrypted: f.encrypted,
           uploadedAt: f.uploadedAt,
+          expiresAt: f.expiresAt || null,
           epochs: f.epochs || 3,
           status: f.status,
           s3Key: f.s3Key,
@@ -718,11 +720,12 @@ export default function App() {
   // Convert CachedFile to FileItem format for FolderCardView
   const fileItems = useMemo(() => {
     let filtered = uploadedFiles.filter((f) => {
-      const uploadDate = new Date(f.uploadedAt);
-      const totalDays = (f.epochs || 3) * daysPerEpoch;
-      const expiryDate = new Date(
-        uploadDate.getTime() + totalDays * 24 * 60 * 60 * 1000,
-      );
+      const expiryDate = f.expiresAt
+        ? new Date(f.expiresAt)
+        : new Date(
+            new Date(f.uploadedAt).getTime() +
+              (f.epochs || 3) * daysPerEpoch * 24 * 60 * 60 * 1000,
+          );
       return expiryDate.getTime() > Date.now();
     });
 
@@ -742,11 +745,12 @@ export default function App() {
       // Files with 10 days or less remaining, sorted by closest to expiring first.
       // Use the dynamic daysPerEpoch value so this matches the network config.
       const calcDaysRemaining = (f: CachedFile) => {
-        const uploadDate = new Date(f.uploadedAt);
-        const totalDays = (f.epochs || 3) * daysPerEpoch;
-        const expiryDate = new Date(
-          uploadDate.getTime() + totalDays * 24 * 60 * 60 * 1000,
-        );
+        const expiryDate = f.expiresAt
+          ? new Date(f.expiresAt)
+          : new Date(
+              new Date(f.uploadedAt).getTime() +
+                (f.epochs || 3) * daysPerEpoch * 24 * 60 * 60 * 1000,
+            );
         const now = new Date();
         return Math.ceil(
           (expiryDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000),
@@ -793,6 +797,7 @@ export default function App() {
       type: f.type,
       encrypted: f.encrypted,
       uploadedAt: f.uploadedAt,
+      expiresAt: f.expiresAt || null,
       epochs: f.epochs,
       status: f.status,
       folderId: f.folderId || null,
@@ -1249,6 +1254,18 @@ export default function App() {
     }
   };
 
+  const handleFolderRenamedOptimistic = (folderId: string, newName: string) => {
+    setFolders((prev) => {
+      const renameInTree = (folderList: any[]): any[] =>
+        folderList.map((folder) => ({
+          ...folder,
+          name: folder.id === folderId ? newName : folder.name,
+          children: renameInTree(folder.children || []),
+        }));
+      return renameInTree(prev);
+    });
+  };
+
   const handleFolderDeleted = () => {
     setFolderRefreshKey((prev) => prev + 1);
     loadFiles();
@@ -1512,6 +1529,15 @@ export default function App() {
               <AlertTriangle className="h-3 w-3 sm:h-4 sm:w-4" />
             </button>
 
+            {/* Create folder button */}
+            <button
+              onClick={() => handleCreateFolder(null)}
+              className={`p-1 sm:p-1.5 hover:bg-zinc-800 rounded-md transition-colors text-gray-300 hover:text-white`}
+              title="Create folder"
+            >
+              <FolderPlus className="h-3 w-3 sm:h-4 sm:w-4" />
+            </button>
+
             {/* Folder icons (scrollable if many) */}
             <div className="flex-1 overflow-y-auto overflow-x-hidden w-full flex flex-col items-center gap-1 px-1 sm:px-2">
               {/* Folders will be rendered here as icons only */}
@@ -1593,6 +1619,7 @@ export default function App() {
                 onRefresh={loadFolders}
                 onFolderDeleted={handleFolderDeleted}
                 onFolderDeletedOptimistic={handleFolderDeletedOptimistic}
+                onFolderRenamedOptimistic={handleFolderRenamedOptimistic}
                 onRequestFolderDelete={handleRequestFolderDelete}
                 folders={folders}
                 key={folderRefreshKey}
@@ -1665,6 +1692,23 @@ export default function App() {
             }
           }}
         >
+          {isDemoAccount && (
+            <div className="mb-4 sm:mb-5 rounded-xl border border-amber-400/70 bg-amber-400/10 px-4 py-3 sm:px-5 sm:py-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-300 mt-0.5" />
+                <div>
+                  <p className="text-sm sm:text-base font-extrabold tracking-wide uppercase text-amber-200">
+                    Demo Account Only
+                  </p>
+                  <p className="mt-1 text-sm sm:text-base text-zinc-100 font-medium">
+                    Files in this session are for demonstration only and are not
+                    permanently saved.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Sidebar toggle button when sidebar is hidden - REMOVED, now in mini sidebar */}
 
           {/* Unified Folder/File View */}
@@ -1679,6 +1723,7 @@ export default function App() {
             onFileMovedOptimistic={handleFileMovedOptimistic}
             onFolderDeleted={handleFolderDeleted}
             onFolderDeletedOptimistic={handleFolderDeletedOptimistic}
+            onFolderRenamedOptimistic={handleFolderRenamedOptimistic}
             onRequestFolderDelete={handleRequestFolderDelete}
             onShowToast={showToast}
             onFolderCreated={handleFolderCreated}

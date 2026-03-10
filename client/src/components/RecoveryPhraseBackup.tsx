@@ -1,10 +1,64 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
+import JSZip from "jszip";
+import { apiUrl } from "../config/api";
 import "../pages/css/Login.css";
 
 interface RecoveryPhraseBackupProps {
   phrase: string;
   onConfirmed: () => void;
   onBack?: () => void;
+}
+
+const PLATFORMS = [
+  { id: "macos-arm64", label: "macOS (Apple Silicon)" },
+  { id: "macos-x64", label: "macOS (Intel)" },
+  { id: "win-x64", label: "Windows" },
+  { id: "linux-x64", label: "Linux" },
+] as const;
+
+async function downloadRecoveryKit(phrase: string, platformId: string) {
+  const phraseText = [
+    "SovereignGuard Recovery Phrase",
+    "================================",
+    "",
+    phrase,
+    "",
+    "Keep this file safe. Anyone with this phrase can recover your files.",
+  ].join("\n");
+
+  const res = await fetch(
+    apiUrl(`/api/recovery-tools/file-recovery-tool-${platformId}.zip`),
+  );
+  const toolZipData = await res.arrayBuffer();
+
+  const toolZip = await JSZip.loadAsync(toolZipData);
+  const kit = new JSZip();
+
+  // Copy every entry from the tool zip, preserving directory structure
+  for (const [path, entry] of Object.entries(toolZip.files)) {
+    if (entry.dir) {
+      kit.folder(path);
+    } else {
+      const data = await entry.async("uint8array");
+      // Preserve unix permissions (rwxr-xr-x for executables)
+      kit.file(path, data, {
+        unixPermissions: entry.unixPermissions || undefined,
+      });
+    }
+  }
+
+  kit.file("recovery-phrase.txt", phraseText);
+
+  const blob = await kit.generateAsync({
+    type: "blob",
+    platform: "UNIX",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `recovery-kit-${platformId}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function RecoveryPhraseBackup({
@@ -17,6 +71,25 @@ export default function RecoveryPhraseBackup({
   const [userInputs, setUserInputs] = useState<Record<number, string>>({});
   const [verificationFailed, setVerificationFailed] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [toolMenuOpen, setToolMenuOpen] = useState(false);
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const toolMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        toolMenuRef.current &&
+        !toolMenuRef.current.contains(e.target as Node)
+      ) {
+        setToolMenuOpen(false);
+      }
+    }
+    if (toolMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [toolMenuOpen]);
 
   const words = phrase.split(" ");
 
@@ -104,13 +177,12 @@ export default function RecoveryPhraseBackup({
     <div className="space-y-4">
       <div className="info-box mb-3">
         <div className="text-xs text-gray-300">
-          <strong className="block mb-2">
-            This 12-word phrase is the ONLY way to recover your account.
-          </strong>
+          <p className="mb-2" style={{ color: "#d1d5db" }}>
+            Save this 12-word phrase — it's the only way to recover files with
+            our tool.
+          </p>
           <ul className="list-disc ml-4 space-y-1">
-            <li>Write this phrase down on paper and store it securely</li>
-            <li>Never share it with anyone - not even support staff</li>
-            <li>Anyone with this phrase can access your files</li>
+            <li>Store it securely and never share it with anyone</li>
             <li>If you lose it, your encrypted files cannot be recovered</li>
           </ul>
         </div>
@@ -135,6 +207,68 @@ export default function RecoveryPhraseBackup({
             </span>
           </div>
         ))}
+      </div>
+
+      <div
+        ref={toolMenuRef}
+        style={{ position: "relative", marginBottom: "0.5rem" }}
+      >
+        <button
+          onClick={() => setToolMenuOpen((o) => !o)}
+          className="btn btn-navy liquid-btn w-full"
+          disabled={downloading !== null}
+        >
+          {downloading ? "Preparing Kit…" : "Recovery Kit ▾"}
+        </button>
+        {toolMenuOpen && (
+          <div
+            style={{
+              position: "absolute",
+              top: "calc(100% + 4px)",
+              left: 0,
+              right: 0,
+              background: "rgb(17, 24, 39)",
+              border: "1px solid rgb(55, 65, 81)",
+              borderRadius: "0.5rem",
+              overflow: "hidden",
+              zIndex: 50,
+            }}
+          >
+            {PLATFORMS.map((p) => (
+              <button
+                key={p.id}
+                onClick={async () => {
+                  setToolMenuOpen(false);
+                  setDownloading(p.id);
+                  try {
+                    await downloadRecoveryKit(phrase, p.id);
+                  } finally {
+                    setDownloading(null);
+                  }
+                }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  padding: "0.5rem 0.75rem",
+                  textAlign: "left",
+                  color: "#e5e7eb",
+                  fontSize: "0.8rem",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.background = "rgb(55, 65, 81)")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.background = "transparent")
+                }
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <button

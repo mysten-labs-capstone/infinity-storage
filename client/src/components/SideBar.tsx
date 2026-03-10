@@ -23,8 +23,6 @@ import {
   Star,
   Download,
   Loader2,
-  Check,
-  X,
   Plus,
   File,
   FolderUp,
@@ -35,6 +33,7 @@ import { getBalance } from "../services/balanceService";
 import { authService } from "../services/authService";
 import { useAuth } from "../auth/AuthContext";
 import { useNavigate } from "react-router-dom";
+import RenameFolderDialog from "./RenameFolderDialog";
 
 export type FolderNode = {
   id: string;
@@ -52,6 +51,7 @@ interface FolderTreeProps {
   onRefresh?: () => void;
   onFolderDeleted?: () => void;
   onFolderDeletedOptimistic?: (folderId: string) => void;
+  onFolderRenamedOptimistic?: (folderId: string, newName: string) => void;
   onRequestFolderDelete?: (folderId: string, folderName: string) => void;
   onUploadClick?: () => void;
   onFolderUploadClick?: () => void;
@@ -91,6 +91,7 @@ export default function FolderTree({
   onRefresh,
   onFolderDeleted,
   onFolderDeletedOptimistic,
+  onFolderRenamedOptimistic,
   onRequestFolderDelete,
   onUploadClick,
   onFolderUploadClick,
@@ -112,8 +113,10 @@ export default function FolderTree({
     x: number;
     y: number;
   } | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
+  const [renamingFolder, setRenamingFolder] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [dragOverRoot, setDragOverRoot] = useState(false);
   const [dragOverFoldersLabel, setDragOverFoldersLabel] = useState(false);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
@@ -350,31 +353,6 @@ export default function FolderTree({
     });
   };
 
-  const handleRename = async (folderId: string) => {
-    const user = authService.getCurrentUser();
-    if (!user?.id || !editingName.trim()) return;
-
-    try {
-      const res = await fetch(apiUrl(`/api/folders/${folderId}`), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, name: editingName.trim() }),
-      });
-
-      if (res.ok) {
-        onRefresh?.();
-      } else {
-        const data = await res.json();
-        alert(data.error || "Failed to rename folder");
-      }
-    } catch (err) {
-      console.error("Failed to rename folder:", err);
-    } finally {
-      setEditingId(null);
-      setEditingName("");
-    }
-  };
-
   const renderFolder = (folder: FolderNode, depth: number = 0) => {
     const isExpanded = expandedIds.has(folder.id);
     const isSelected = selectedFolderId === folder.id;
@@ -419,48 +397,7 @@ export default function FolderTree({
             style={{ color: folder.color || "#60a5fa" }}
           />
 
-          {editingId === folder.id ? (
-            <div className="flex flex-1 items-center gap-0.5 min-w-0">
-              <input
-                type="text"
-                value={editingName}
-                onChange={(e) => setEditingName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleRename(folder.id);
-                  if (e.key === "Escape") {
-                    setEditingId(null);
-                    setEditingName("");
-                  }
-                }}
-                className="flex-1 min-w-0 bg-transparent border-b border-teal-600 outline-none text-sm px-1 text-gray-300"
-                autoFocus
-                onClick={(e) => e.stopPropagation()}
-              />
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleRename(folder.id);
-                }}
-                className="p-0.5 hover:bg-emerald-800/40 rounded transition-colors text-emerald-400 shrink-0"
-                title="Confirm"
-              >
-                <Check className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEditingId(null);
-                  setEditingName("");
-                }}
-                className="p-0.5 hover:bg-zinc-700 rounded transition-colors text-gray-400 shrink-0"
-                title="Cancel"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ) : (
-            <span className="flex-1 text-sm truncate">{folder.name}</span>
-          )}
+          <span className="flex-1 text-sm truncate">{folder.name}</span>
 
           <button
             onClick={(e) => {
@@ -978,8 +915,7 @@ export default function FolderTree({
                       .flatMap((f) => f.children)
                       .find((f) => f.id === contextMenu.folderId);
                   if (folder) {
-                    setEditingId(folder.id);
-                    setEditingName(folder.name);
+                    setRenamingFolder({ id: folder.id, name: folder.name });
                   }
                   setContextMenu(null);
                 }}
@@ -1011,6 +947,16 @@ export default function FolderTree({
           </>,
           document.body,
         )}
+
+      <RenameFolderDialog
+        open={!!renamingFolder}
+        onClose={() => setRenamingFolder(null)}
+        folderId={renamingFolder?.id ?? ""}
+        currentName={renamingFolder?.name ?? ""}
+        onRenamed={(folderId, newName) => {
+          onFolderRenamedOptimistic?.(folderId, newName);
+        }}
+      />
     </div>
   );
 }

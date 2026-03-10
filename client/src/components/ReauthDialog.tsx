@@ -160,18 +160,18 @@ export function ReauthDialog({ open, onClose, onSuccess }: ReauthDialogProps) {
             {error && <p className="text-sm text-red-600">{error}</p>}
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="flex gap-3">
             <Button
               type="button"
               onClick={onClose}
-              className="bg-zinc-900 text-gray-300 hover:bg-zinc-800 border border-zinc-800"
+              className="flex-1 border-slate-700 bg-slate-800/50 hover:bg-slate-700/50 text-white h-11"
               disabled={loading}
             >
               Cancel
             </Button>
             <Button
               type="submit"
-              className="bg-emerald-700 hover:bg-emerald-600 text-white"
+              className="flex-1 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 text-white font-semibold shadow-lg shadow-emerald-500/25 h-11 transition-all"
               disabled={loading || !password}
             >
               {loading ? "Restoring..." : "Restore Key"}

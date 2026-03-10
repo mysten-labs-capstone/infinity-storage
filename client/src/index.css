@@ -68,7 +68,7 @@ body,
 }
 
 html {
-  background-color: hsl(var(--background));
+  background-color: #000;
   overscroll-behavior: none; /* Prevent rubber-band overscroll from showing page background */
   -webkit-overflow-scrolling: touch;
 }
@@ -81,8 +81,9 @@ body {
     "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: hsl(var(--background));
+  background-color: #000;
   color: hsl(var(--foreground));
+  overscroll-behavior: none; /* Prevent iOS bottom/top bounce showing white */
 }
 
 code {

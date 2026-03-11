@@ -50,16 +50,16 @@ function createWalrusStream(
   const stream = new ReadableStream<Uint8Array>({
     async start(ctrl) {
       controller = ctrl;
-      
+
       try {
         // Try to use getSlivers first - it handles parallel fetching internally
         // and may provide better error handling with node switching
         let blobData: Uint8Array | null = null;
-        
-        if (typeof walrusClient.getSlivers === 'function') {
+
+        if (typeof walrusClient.getSlivers === "function") {
           try {
             const sliversResult = await walrusClient.getSlivers({ blobId });
-            
+
             // Extract blob data from result
             if (sliversResult instanceof Uint8Array) {
               blobData = sliversResult;
@@ -67,24 +67,30 @@ function createWalrusStream(
               blobData = new Uint8Array(sliversResult);
             } else if (sliversResult?.blob) {
               const data = sliversResult.blob;
-              blobData = data instanceof Uint8Array ? data : new Uint8Array(data);
+              blobData =
+                data instanceof Uint8Array ? data : new Uint8Array(data);
             } else if (sliversResult?.data) {
               const data = sliversResult.data;
-              blobData = data instanceof Uint8Array ? data : new Uint8Array(data);
+              blobData =
+                data instanceof Uint8Array ? data : new Uint8Array(data);
             } else if (sliversResult?.contents) {
               const data = sliversResult.contents;
-              blobData = data instanceof Uint8Array ? data : new Uint8Array(data);
+              blobData =
+                data instanceof Uint8Array ? data : new Uint8Array(data);
             }
           } catch (sliverErr: any) {
             // getSlivers failed - will fall back to readBlob
-            console.warn(`[WalrusStream] getSlivers failed: ${sliverErr.message}, falling back to readBlob`);
+            console.warn(
+              `[WalrusStream] getSlivers failed: ${sliverErr.message}, falling back to readBlob`,
+            );
           }
         }
 
         // Fallback to readBlob if getSlivers didn't work or isn't available
         if (!blobData) {
           const bytes = await walrusClient.readBlob({ blobId });
-          blobData = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+          blobData =
+            bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
         }
 
         if (!blobData || blobData.length === 0) {
@@ -95,16 +101,23 @@ function createWalrusStream(
         // Stream in chunks for incremental delivery
         // Use 128KB chunks for better throughput while still being responsive
         const chunkSize = 128 * 1024;
-        for (let offset = 0; offset < blobData.length && !cancelled; offset += chunkSize) {
-          const chunk = blobData.slice(offset, Math.min(offset + chunkSize, blobData.length));
+        for (
+          let offset = 0;
+          offset < blobData.length && !cancelled;
+          offset += chunkSize
+        ) {
+          const chunk = blobData.slice(
+            offset,
+            Math.min(offset + chunkSize, blobData.length),
+          );
           controller.enqueue(chunk);
-          
+
           // Yield control periodically to prevent blocking
           if (offset % (chunkSize * 4) === 0) {
-            await new Promise(resolve => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
           }
         }
-        
+
         if (!cancelled) {
           controller.close();
         }
@@ -114,7 +127,7 @@ function createWalrusStream(
         }
       }
     },
-    
+
     cancel() {
       cancelled = true;
     },
@@ -134,9 +147,13 @@ async function streamWalrusBlob(
     if (metadata?.metadata?.V1?.unencoded_length) {
       // Extract unencoded length from metadata
       const size = metadata.metadata.V1.unencoded_length;
-      contentLength = typeof size === 'string' ? parseInt(size, 10) : Number(size);
+      contentLength =
+        typeof size === "string" ? parseInt(size, 10) : Number(size);
     } else if (metadata?.size) {
-      contentLength = typeof metadata.size === 'string' ? parseInt(metadata.size, 10) : Number(metadata.size);
+      contentLength =
+        typeof metadata.size === "string"
+          ? parseInt(metadata.size, 10)
+          : Number(metadata.size);
     }
   } catch {
     // Metadata fetch failed, continue without size
@@ -145,7 +162,7 @@ async function streamWalrusBlob(
   // Create streaming download with parallel sliver fetching
   // getSlivers handles node switching and alternate sliver fetching internally
   const stream = createWalrusStream(walrusClient, blobId);
-  
+
   return { stream, contentLength };
 }
 
@@ -187,7 +204,8 @@ export async function POST(req: Request) {
 async function handleDownload(req: Request): Promise<Response> {
   try {
     const body = await req.json();
-    const { blobId, filename, userId, shareId, preferPresignedUrl } = body ?? {};
+    const { blobId, filename, userId, shareId, preferPresignedUrl } =
+      body ?? {};
 
     if (!blobId) {
       return NextResponse.json(
@@ -337,18 +355,24 @@ async function handleDownload(req: Request): Promise<Response> {
       if (preferPresignedUrl) {
         try {
           const expiresIn = 300; // 5 minutes
-          const downloadUrl = await s3Service.getPresignedDownloadUrl(fileRecord.s3Key, expiresIn);
+          const downloadUrl = await s3Service.getPresignedDownloadUrl(
+            fileRecord.s3Key,
+            expiresIn,
+          );
           return NextResponse.json(
             {
               downloadUrl,
               downloadName,
               expiresIn,
-              message: "Open downloadUrl in browser or use as redirect for direct S3 download.",
+              message:
+                "Open downloadUrl in browser or use as redirect for direct S3 download.",
             },
             { status: 200, headers: withCORS(req) },
           );
         } catch (presignErr: any) {
-          console.warn(`[download] Presigned URL failed, falling back to stream: ${presignErr?.message}`);
+          console.warn(
+            `[download] Presigned URL failed, falling back to stream: ${presignErr?.message}`,
+          );
           // Fall through to stream path
         }
       }
@@ -471,7 +495,7 @@ async function handleDownload(req: Request): Promise<Response> {
         const contentDisposition = isAscii
           ? `attachment; filename="${downloadName.replace(/"/g, "")}"`
           : `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`;
-        
+
         const headers: Record<string, string> = {
           "Content-Type": "application/octet-stream",
           "Content-Disposition": contentDisposition,
@@ -487,7 +511,42 @@ async function handleDownload(req: Request): Promise<Response> {
           headers["Content-Length"] = String(walrusStreamResult.contentLength);
         }
 
-        return new Response(walrusStreamResult.stream, {
+        // Re-upload to S3 in the background so future downloads are faster.
+        // We tee the stream: one branch goes to the client, the other collects
+        // bytes and uploads them to S3 (fire-and-forget).
+        const [clientStream, cacheStream] = walrusStreamResult.stream.tee();
+
+        if (s3Service.isEnabled() && fileRecord?.s3Key) {
+          void (async () => {
+            try {
+              const chunks: Uint8Array[] = [];
+              const reader = cacheStream.getReader();
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                if (value) chunks.push(value);
+              }
+              const buf = Buffer.concat(chunks);
+              await s3Service.upload(fileRecord.s3Key!, buf, {
+                filename: downloadName,
+                "rehydrated-from": "walrus",
+              });
+              console.log(
+                `[download] Re-cached ${blobId} to S3 (${buf.length} bytes)`,
+              );
+            } catch (err) {
+              console.warn(
+                `[download] Background S3 re-cache failed (non-fatal):`,
+                err,
+              );
+            }
+          })();
+        } else {
+          // Nobody is consuming cacheStream — cancel it to avoid a leak
+          void cacheStream.cancel();
+        }
+
+        return new Response(clientStream, {
           status: 200,
           headers: withCORS(req, headers),
         });
@@ -502,12 +561,12 @@ async function handleDownload(req: Request): Promise<Response> {
           try {
             const s3Stream = await s3Service.getObjectStream(fileRecord.s3Key);
             fromS3 = true;
-            
+
             const isAscii = /^[\x00-\x7F]*$/.test(downloadName);
             const contentDisposition = isAscii
               ? `attachment; filename="${downloadName.replace(/"/g, "")}"`
               : `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`;
-            
+
             return new Response(s3Stream.body, {
               status: 200,
               headers: withCORS(req, {

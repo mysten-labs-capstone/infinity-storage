@@ -133,7 +133,8 @@ export async function downloadBlob(
   userId?: string,
   options?: { preferPresignedUrl?: boolean },
 ): Promise<DownloadResult> {
-  const preferPresignedUrl = options?.preferPresignedUrl ?? PREFER_PRESIGNED_DOWNLOAD;
+  const preferPresignedUrl =
+    options?.preferPresignedUrl ?? PREFER_PRESIGNED_DOWNLOAD;
   const res = await fetch(apiUrl("/api/download"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -145,10 +146,20 @@ export async function downloadBlob(
     }),
   });
 
-  if (preferPresignedUrl && res.ok && res.headers.get("content-type")?.includes("application/json")) {
+  if (
+    preferPresignedUrl &&
+    res.ok &&
+    res.headers.get("content-type")?.includes("application/json")
+  ) {
     const data = await res.json();
     if (data.downloadUrl) {
-      window.open(data.downloadUrl, "_blank", "noopener,noreferrer");
+      const a = document.createElement("a");
+      a.href = data.downloadUrl;
+      a.download = data.downloadName || "";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       return { ok: true, presigned: true, downloadName: data.downloadName };
     }
   }

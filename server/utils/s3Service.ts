@@ -387,7 +387,12 @@ class S3Service {
       await this.client.send(command);
       return true;
     } catch (err: any) {
-      if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+      if (
+        err.name === 'NotFound' ||
+        err.name === 'NoSuchKey' ||
+        err.Code === 'NoSuchKey' ||
+        err.$metadata?.httpStatusCode === 404
+      ) {
         return false;
       }
       throw err;

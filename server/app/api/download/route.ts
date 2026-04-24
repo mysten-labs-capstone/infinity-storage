@@ -350,9 +350,30 @@ async function handleDownload(req: Request): Promise<Response> {
 
     // PRIORITY 1: Try S3 FIRST. If the file exists in S3, stream it immediately (no buffering).
     // On NoSuchKey/404, fall back to Walrus without retrying. On other errors, retry once then Walrus.
+    // Presigned URLs must not be returned unless HeadObject succeeds — signing does not verify the key exists,
+    // and a stale s3Key (e.g. bucket emptied / new account) would otherwise yield a broken S3 URL.
     // Optional: preferPresignedUrl returns a direct S3 URL so client downloads from S3 (faster on prod).
     if (fileRecord?.s3Key && s3Service.isEnabled()) {
-      if (preferPresignedUrl) {
+      let s3KeyExists: boolean | null = null;
+      try {
+        s3KeyExists = await s3Service.exists(fileRecord.s3Key);
+      } catch (headErr: any) {
+        console.warn(
+          `[download] S3 HeadObject failed (${headErr?.message}), will try GetObject/Walrus`,
+        );
+        s3KeyExists = null;
+      }
+
+      if (s3KeyExists === false) {
+        console.warn(
+          `[download] S3 object missing for key ${fileRecord.s3Key}, skipping S3 — using Walrus`,
+        );
+        // Leave s3StreamResult null; fall through to Walrus below.
+      } else if (
+        preferPresignedUrl &&
+        s3KeyExists === true &&
+        !fileRecord?.encrypted
+      ) {
         try {
           const expiresIn = 300; // 5 minutes
           const downloadUrl = await s3Service.getPresignedDownloadUrl(
@@ -377,87 +398,93 @@ async function handleDownload(req: Request): Promise<Response> {
         }
       }
 
-      const maxAttempts = Number(process.env.S3_DOWNLOAD_RETRIES || 2);
-      // On high-latency prod (e.g. VM far from bucket), increase S3_DOWNLOAD_TIMEOUT_MS (e.g. 30000)
-      const perAttemptTimeout = Number(
-        process.env.S3_DOWNLOAD_TIMEOUT_MS || 15000,
-      );
-      let attempt = 0;
       let lastS3Error: any = null;
+      if (s3KeyExists !== false) {
+        const maxAttempts = Number(process.env.S3_DOWNLOAD_RETRIES || 2);
+        // On high-latency prod (e.g. VM far from bucket), increase S3_DOWNLOAD_TIMEOUT_MS (e.g. 30000)
+        const perAttemptTimeout = Number(
+          process.env.S3_DOWNLOAD_TIMEOUT_MS || 15000,
+        );
+        let attempt = 0;
 
-      while (attempt < maxAttempts && !s3StreamResult) {
-        attempt++;
-        try {
-          const streamPromise = s3Service.getObjectStream(fileRecord.s3Key);
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error("S3 download timeout")),
-              perAttemptTimeout,
-            ),
-          );
-          s3StreamResult = await Promise.race([streamPromise, timeoutPromise]);
-          fromS3 = true;
-          break;
-        } catch (s3Err: any) {
-          lastS3Error = s3Err;
-          const isNoSuchKey =
-            s3Err?.name === "NoSuchKey" ||
-            s3Err?.Code === "NoSuchKey" ||
-            s3Err?.$metadata?.httpStatusCode === 404;
-          if (isNoSuchKey) {
-            // File not in S3 (e.g. sync upload); skip retries and use Walrus
-            lastS3Error = s3Err;
-            break;
-          }
-          console.warn(
-            `S3 download attempt ${attempt} failed: ${s3Err?.message || s3Err}`,
-          );
-
-          // Re-check DB status to update our local record, but don't break the retry loop
-          // just because status changed - continue trying S3 if it's available, as the
-          // file might still be downloading from S3 even if status changed to completed
+        while (attempt < maxAttempts && !s3StreamResult) {
+          attempt++;
           try {
-            const refreshed = await prisma.file.findUnique({
-              where: { blobId },
-              select: { status: true, s3Key: true },
-            });
-            if (refreshed) {
-              fileRecord.status = refreshed.status as typeof fileRecord.status;
-              fileRecord.s3Key = refreshed.s3Key;
-              // If s3Key was removed, stop retrying S3 and fall through to Walrus
-              if (!refreshed.s3Key) {
-                break;
-              }
-              // Don't break just because status changed to completed - continue retrying S3
-              // as the S3 download might still succeed even if status changed
+            const streamPromise = s3Service.getObjectStream(fileRecord.s3Key);
+            const timeoutPromise = new Promise<never>((_, reject) =>
+              setTimeout(
+                () => reject(new Error("S3 download timeout")),
+                perAttemptTimeout,
+              ),
+            );
+            s3StreamResult = await Promise.race([streamPromise, timeoutPromise]);
+            fromS3 = true;
+            break;
+          } catch (s3Err: any) {
+            lastS3Error = s3Err;
+            const isNoSuchKey =
+              s3Err?.name === "NoSuchKey" ||
+              s3Err?.Code === "NoSuchKey" ||
+              s3Err?.$metadata?.httpStatusCode === 404;
+            if (isNoSuchKey) {
+              // File not in S3 (e.g. sync upload); skip retries and use Walrus
+              lastS3Error = s3Err;
+              break;
             }
-          } catch {
-            /* ignore */
-          }
+            console.warn(
+              `S3 download attempt ${attempt} failed: ${s3Err?.message || s3Err}`,
+            );
 
-          if (attempt < maxAttempts) {
-            const waitMs = Math.min(1000 * Math.pow(1.5, attempt), 3000);
-            await new Promise((res) => setTimeout(res, waitMs));
+            // Re-check DB status to update our local record, but don't break the retry loop
+            // just because status changed - continue trying S3 if it's available, as the
+            // file might still be downloading from S3 even if status changed to completed
+            try {
+              const refreshed = await prisma.file.findUnique({
+                where: { blobId },
+                select: { status: true, s3Key: true },
+              });
+              if (refreshed) {
+                fileRecord.status = refreshed.status as typeof fileRecord.status;
+                fileRecord.s3Key = refreshed.s3Key;
+                // If s3Key was removed, stop retrying S3 and fall through to Walrus
+                if (!refreshed.s3Key) {
+                  break;
+                }
+                // Don't break just because status changed to completed - continue retrying S3
+                // as the S3 download might still succeed even if status changed
+              }
+            } catch {
+              /* ignore */
+            }
+
+            if (attempt < maxAttempts) {
+              const waitMs = Math.min(1000 * Math.pow(1.5, attempt), 3000);
+              await new Promise((res) => setTimeout(res, waitMs));
+            }
           }
         }
-      }
 
-      // If we got a stream, return immediately (fast path – no buffering)
-      if (s3StreamResult) {
-        const isAscii = /^[\x00-\x7F]*$/.test(downloadName);
-        const contentDisposition = isAscii
-          ? `attachment; filename="${downloadName.replace(/"/g, "")}"`
-          : `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`;
-        const headers = withCORS(req, {
-          "Content-Type": "application/octet-stream",
-          "Content-Length": String(s3StreamResult.contentLength),
-          "Content-Disposition": contentDisposition,
-          "Cache-Control": "no-store",
-          "X-From-S3": "true",
-          "X-From-Cache": "false",
-          "X-Decrypted": "false",
-        });
-        return new Response(s3StreamResult.body, { status: 200, headers });
+        // If we got a stream, return immediately (fast path – no buffering)
+        if (s3StreamResult) {
+          const isAscii = /^[\x00-\x7F]*$/.test(downloadName);
+          const contentDisposition = isAscii
+            ? `attachment; filename="${downloadName.replace(/"/g, "")}"`
+            : `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`;
+          const headers = withCORS(req, {
+            "Content-Type": "application/octet-stream",
+            "Content-Length": String(s3StreamResult.contentLength),
+            "Content-Disposition": contentDisposition,
+            "Cache-Control": "no-store",
+            "X-From-S3": "true",
+            "X-From-Cache": "false",
+            "X-Decrypted": "false",
+          });
+          return new Response(s3StreamResult.body, { status: 200, headers });
+        }
+
+        if (!s3StreamResult && lastS3Error) {
+          console.warn("S3 download failed; will try Walrus fallback");
+        }
       }
 
       if (
@@ -475,10 +502,6 @@ async function handleDownload(req: Request): Promise<Response> {
           },
           { status: 202, headers: withCORS(req) },
         );
-      }
-
-      if (!s3StreamResult && lastS3Error) {
-        console.warn("S3 download failed; will try Walrus fallback");
       }
     }
 

@@ -179,6 +179,7 @@ export function ShareDialog({
           privateKey,
           filename,
           user?.id,
+          { preferPresignedUrl: false },
         );
         if (!(blobResponse instanceof Response)) {
           throw new Error(

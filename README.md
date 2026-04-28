@@ -8,7 +8,6 @@ Infinity Storage is a TypeScript project for encrypted file storage on Walrus wi
 - Kevin Lee
 - Edwin Medrano Villela
 - Awin Zhang
-- Suhrit Padakanti
 
 ## Repository Layout
 
